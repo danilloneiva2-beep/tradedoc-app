@@ -1,0 +1,707 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
+import {
+  LayoutDashboard, CalendarDays, Wallet, Wrench, CreditCard, TrendingUp,
+  ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
+  Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight,
+} from "lucide-react";
+import { supabase } from "./supabaseClient";
+
+/* ---------------------------------------------------------------
+   Tradedoc — app real conectado ao Supabase (auth + banco de dados)
+----------------------------------------------------------------*/
+
+function fmtBRL(v) {
+  const sign = v < 0 ? "-" : "+";
+  return `${sign}R$ ${Math.abs(v).toLocaleString("pt-BR")}`;
+}
+
+const BASE_CAPITAL = 12000;
+
+/* --------------------------- Derived stats --------------------------- */
+
+function useDerivedData(trades) {
+  return useMemo(() => {
+    const sorted = [...trades].sort((a, b) => new Date(a.trade_date) - new Date(b.trade_date));
+    let running = BASE_CAPITAL;
+    let peak = BASE_CAPITAL;
+    let maxDD = 0;
+    const equityCurve = sorted.map((t) => {
+      running += Number(t.pnl);
+      peak = Math.max(peak, running);
+      const dd = ((running - peak) / peak) * 100;
+      if (dd < maxDD) maxDD = dd;
+      return { d: t.trade_date.slice(8, 10), eq: running };
+    });
+
+    const wins = trades.filter((t) => t.pnl > 0);
+    const losses = trades.filter((t) => t.pnl < 0);
+    const winRate = trades.length ? Math.round((wins.length / trades.length) * 100) : 0;
+    const totalPnL = trades.reduce((s, t) => s + Number(t.pnl), 0);
+    const grossWin = wins.reduce((s, t) => s + Number(t.pnl), 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl), 0));
+    const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "—";
+
+    const assetMap = {};
+    trades.forEach((t) => {
+      if (!assetMap[t.asset]) assetMap[t.asset] = { asset: t.asset, trades: 0, wins: 0, pnl: 0 };
+      assetMap[t.asset].trades += 1;
+      if (t.pnl > 0) assetMap[t.asset].wins += 1;
+      assetMap[t.asset].pnl += Number(t.pnl);
+    });
+    const assetPerf = Object.values(assetMap)
+      .map((a) => ({ ...a, winRate: Math.round((a.wins / a.trades) * 100) }))
+      .sort((a, b) => b.pnl - a.pnl);
+
+    const recentTrades = [...trades]
+      .sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date))
+      .slice(0, 6);
+
+    return { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, recentTrades, currentEquity: running };
+  }, [trades]);
+}
+
+/* ------------------------------- UI bits -------------------------------- */
+
+function StatCard({ icon: Icon, label, value, sub, tone }) {
+  return (
+    <div className="tf-card tf-stat">
+      <div className="tf-stat-top">
+        <span className="tf-stat-label">{label}</span>
+        <span className={`tf-icon-badge tone-${tone}`}><Icon size={15} /></span>
+      </div>
+      <div className={`tf-stat-value ${tone === "up" ? "text-lime" : tone === "down" ? "text-coral" : ""}`}>{value}</div>
+      {sub && <div className="tf-stat-sub">{sub}</div>}
+    </div>
+  );
+}
+
+function Sidebar({ active, setActive, userName }) {
+  const items = [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "accounts", label: "Contas", icon: Wallet },
+    { id: "tools", label: "Ferramentas", icon: Wrench },
+    { id: "profile", label: "Perfil", icon: User },
+    { id: "plans", label: "Planos", icon: CreditCard },
+  ];
+  return (
+    <aside className="tf-sidebar">
+      <div className="tf-brand">
+        <div className="tf-brand-name">TRADE<span className="text-blue">DOC</span></div>
+      </div>
+      <nav className="tf-nav">
+        {items.map((it) => (
+          <button key={it.id} onClick={() => setActive(it.id)} className={`tf-nav-item ${active === it.id ? "active" : ""}`}>
+            <it.icon size={17} /><span>{it.label}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="tf-sidebar-footer">
+        {userName && (
+          <button className="tf-user-chip" onClick={() => setActive("profile")}>
+            <span className="tf-user-avatar">{userName.charAt(0).toUpperCase()}</span>
+            <span className="tf-user-name">{userName}</span>
+          </button>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+/* ---------------------------- New trade modal ---------------------------- */
+
+function NewTradeModal({ onClose, onSubmit, accounts }) {
+  const [asset, setAsset] = useState("WINFUT");
+  const [side, setSide] = useState("Compra");
+  const [amount, setAmount] = useState("");
+  const [outcome, setOutcome] = useState("win");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const val = Math.abs(parseFloat(amount.replace(",", "."))) || 0;
+    if (val === 0 || !accountId) return;
+    const pnl = outcome === "win" ? val : -val;
+    setSaving(true);
+    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId });
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div className="tf-modal-overlay" onClick={onClose}>
+      <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="tf-modal-head">
+          <h3>Registrar trade</h3>
+          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="tf-form">
+          <div className="tf-form-row">
+            <label>Ativo</label>
+            <input value={asset} onChange={(e) => setAsset(e.target.value)} required />
+          </div>
+          <div className="tf-form-row-inline">
+            <div className="tf-form-row">
+              <label>Lado</label>
+              <div className="tf-toggle-group">
+                <button type="button" className={side === "Compra" ? "active" : ""} onClick={() => setSide("Compra")}>Compra</button>
+                <button type="button" className={side === "Venda" ? "active" : ""} onClick={() => setSide("Venda")}>Venda</button>
+              </div>
+            </div>
+            <div className="tf-form-row">
+              <label>Resultado</label>
+              <div className="tf-toggle-group">
+                <button type="button" className={outcome === "win" ? "active tone-win" : ""} onClick={() => setOutcome("win")}>Ganho</button>
+                <button type="button" className={outcome === "loss" ? "active tone-loss" : ""} onClick={() => setOutcome("loss")}>Perda</button>
+              </div>
+            </div>
+          </div>
+          <div className="tf-form-row-inline">
+            <div className="tf-form-row">
+              <label>P&L (R$)</label>
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" required />
+            </div>
+            <div className="tf-form-row">
+              <label>Data</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+            </div>
+          </div>
+          <div className="tf-form-row">
+            <label>Conta</label>
+            <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          <button type="submit" className="tf-btn-primary tf-form-submit" disabled={saving}>
+            <Plus size={15} /> {saving ? "Salvando..." : "Salvar trade"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------- Views --------------------------------- */
+
+function DashboardView({ data, onOpenModal }) {
+  const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, recentTrades, currentEquity } = data;
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Visão geral</h1><p className="tf-muted">Sua performance consolidada</p></div>
+        <button className="tf-btn-primary" onClick={onOpenModal}><Plus size={15} /> Novo trade</button>
+      </div>
+
+      <div className="tf-stats-grid">
+        <StatCard icon={Target} label="Win rate" value={`${winRate}%`} tone="up" />
+        <StatCard icon={TrendingUp} label="P&L total" value={fmtBRL(totalPnL)} tone={totalPnL >= 0 ? "up" : "down"} />
+        <StatCard icon={ArrowDownRight} label="Drawdown máx." value={`${maxDD.toFixed(1)}%`} tone="down" />
+        <StatCard icon={Percent} label="Fator de lucro" value={profitFactor} tone="neutral" />
+      </div>
+
+      <div className="tf-card tf-hero-chart">
+        <div className="tf-card-head">
+          <div><h3>Curva de capital</h3></div>
+          <div className="tf-hero-value">R$ {currentEquity.toLocaleString("pt-BR")}</div>
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={equityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+            <defs>
+              <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#1FA35C" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#0070FF" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="#1C2537" vertical={false} />
+            <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
+            <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} />
+            <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${v.toLocaleString("pt-BR")}`, "Capital"]} />
+            <Area type="monotone" dataKey="eq" stroke="#1FA35C" strokeWidth={2.5} fill="url(#eqFill)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="tf-two-col">
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Performance por ativo</h3></div>
+          <div className="tf-table">
+            <div className="tf-table-row tf-table-head"><span>Ativo</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
+            {assetPerf.length === 0 && <div className="tf-empty">Nenhum trade registrado ainda.</div>}
+            {assetPerf.map((a) => (
+              <div className="tf-table-row" key={a.asset}>
+                <span className="tf-mono tf-asset">{a.asset}</span>
+                <span className="tf-mono tf-muted">{a.trades}</span>
+                <span className="tf-mono">{a.winRate}%</span>
+                <span className={`tf-mono ${a.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(a.pnl)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Trades recentes</h3></div>
+          <div className="tf-trade-list">
+            {recentTrades.length === 0 && <div className="tf-empty">Nenhum trade registrado ainda.</div>}
+            {recentTrades.map((t) => (
+              <div className="tf-trade-row" key={t.id}>
+                <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
+                <span className="tf-muted tf-mono tf-trade-date">{t.trade_date.slice(8,10)}/{t.trade_date.slice(5,7)}</span>
+                <span className="tf-asset">{t.asset}</span>
+                <span className="tf-muted tf-trade-side">{t.side}</span>
+                <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountsView({ accounts, onAddAccount }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [balance, setBalance] = useState("");
+  const [type, setType] = useState("Real");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const bal = parseFloat(balance.replace(",", ".")) || 0;
+    await onAddAccount({ name: name || "Nova conta", type, balance: bal, status: "Ativa" });
+    setSaving(false);
+    setAdding(false);
+    setName(""); setBalance("");
+  };
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Contas</h1><p className="tf-muted">Gerencie suas contas de trading</p></div>
+        <button className="tf-btn-primary" onClick={() => setAdding(true)}><Plus size={15} /> Adicionar conta</button>
+      </div>
+
+      {adding && (
+        <div className="tf-card" style={{ marginBottom: 16 }}>
+          <form onSubmit={submit} className="tf-form tf-form-inline-3">
+            <div className="tf-form-row"><label>Nome da conta</label><input value={name} onChange={(e) => setName(e.target.value)} required /></div>
+            <div className="tf-form-row"><label>Saldo inicial (R$)</label><input value={balance} onChange={(e) => setBalance(e.target.value)} inputMode="decimal" required /></div>
+            <div className="tf-form-row"><label>Tipo</label><select value={type} onChange={(e) => setType(e.target.value)}><option>Real</option><option>Prop Firm</option></select></div>
+            <div className="tf-form-row" style={{ flexDirection: "row", gap: 8 }}>
+              <button type="button" className="tf-btn-outline" onClick={() => setAdding(false)}>Cancelar</button>
+              <button type="submit" className="tf-btn-primary" disabled={saving}>{saving ? "Salvando..." : "Salvar"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="tf-accounts-grid">
+        {accounts.map((a) => (
+          <div className="tf-card tf-account-card" key={a.id}>
+            <div className="tf-account-top">
+              <span className="tf-icon-badge tone-neutral"><Building2 size={16} /></span>
+              <span className={`tf-badge ${a.type === "Prop Firm" ? "badge-blue" : "badge-outline"}`}>{a.type}</span>
+            </div>
+            <h3 className="tf-account-name">{a.name}</h3>
+            <div className="tf-account-balance">R$ {Number(a.balance).toLocaleString("pt-BR")}</div>
+            <div className="tf-account-status"><ShieldCheck size={13} className="text-lime" /> {a.status}</div>
+          </div>
+        ))}
+        {accounts.length === 0 && <p className="tf-empty">Nenhuma conta cadastrada ainda.</p>}
+      </div>
+    </div>
+  );
+}
+
+function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setActive, onLogout }) {
+  const [name, setName] = useState(userName);
+  const [savedMsg, setSavedMsg] = useState(false);
+  const [newPwd, setNewPwd] = useState("");
+  const [pwdMsg, setPwdMsg] = useState("");
+
+  const saveProfile = async (e) => {
+    e.preventDefault();
+    await onUpdateProfile(name);
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 2500);
+  };
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    if (newPwd.length < 6) { setPwdMsg("error:A senha precisa ter ao menos 6 caracteres."); return; }
+    const { error } = await supabase.auth.updateUser({ password: newPwd });
+    if (error) { setPwdMsg("error:" + error.message); return; }
+    setPwdMsg("ok:Senha atualizada com sucesso.");
+    setNewPwd("");
+    setTimeout(() => setPwdMsg(""), 3000);
+  };
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header"><div><h1>Perfil</h1><p className="tf-muted">{userEmail}</p></div></div>
+      <div className="tf-two-col" style={{ alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Informações pessoais</h3></div>
+            <form onSubmit={saveProfile} className="tf-form">
+              <div className="tf-form-row"><label>Nome</label><input value={name} onChange={(e) => setName(e.target.value)} required /></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button type="submit" className="tf-btn-primary">Salvar alterações</button>
+                {savedMsg && <span className="text-lime" style={{ fontSize: 12.5 }}>Salvo</span>}
+              </div>
+            </form>
+          </div>
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Alterar senha</h3></div>
+            <form onSubmit={changePassword} className="tf-form">
+              <div className="tf-form-row"><label>Nova senha</label><input type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} placeholder="mín. 6 caracteres" /></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button type="submit" className="tf-btn-outline">Atualizar senha</button>
+                {pwdMsg && <span className={pwdMsg.startsWith("ok:") ? "text-lime" : "text-coral"} style={{ fontSize: 12.5 }}>{pwdMsg.split(":")[1]}</span>}
+              </div>
+            </form>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Assinatura</h3></div>
+            {currentPlan ? (
+              <><div className="tf-badge badge-blue" style={{ display: "inline-block", marginBottom: 10 }}>Plano {currentPlan} ativo</div>
+              <button className="tf-btn-outline" onClick={() => setActive("plans")}>Gerenciar assinatura</button></>
+            ) : (
+              <><div className="tf-badge badge-outline" style={{ display: "inline-block", marginBottom: 10 }}>Nenhum plano ativo</div>
+              <button className="tf-btn-primary" onClick={() => setActive("plans")}>Ver planos</button></>
+            )}
+          </div>
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Sessão</h3></div>
+            <button className="tf-btn-outline tf-logout-btn" onClick={onLogout}><ArrowRight size={14} style={{ transform: "rotate(180deg)" }} /> Sair da plataforma</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlansView({ currentPlan, onSubscribe }) {
+  const plans = [
+    { name: "Starter", price: "R$ 39", period: "/mês", features: ["1 conta conectada", "Diário de trades ilimitado", "Relatórios básicos"] },
+    { name: "Pro", price: "R$ 390", period: "/ano", highlight: true, features: ["Contas ilimitadas", "Analytics avançado", "Suporte prioritário"] },
+  ];
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header"><div><h1>Planos</h1><p className="tf-muted">Escolha o plano ideal</p></div></div>
+      <div className="tf-plans-grid">
+        {plans.map((p) => {
+          const isActive = currentPlan === p.name;
+          return (
+            <div className={`tf-card tf-plan-card ${p.highlight ? "plan-highlight" : ""}`} key={p.name}>
+              {isActive && <span className="tf-plan-tag tf-plan-tag-active">Plano atual</span>}
+              <h3>{p.name}</h3>
+              <div className="tf-plan-price">{p.price}<span className="tf-muted">{p.period}</span></div>
+              <ul className="tf-plan-features">{p.features.map((f) => <li key={f}><Check size={14} className="text-lime" /> {f}</li>)}</ul>
+              <button className={isActive ? "tf-btn-outline" : "tf-btn-primary"} onClick={() => !isActive && onSubscribe(p.name)} disabled={isActive}>
+                {isActive ? "Assinado" : `Assinar ${p.name}`}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <p className="tf-muted" style={{ marginTop: 16, maxWidth: 480 }}>
+        Nota: este botão ainda não processa pagamento real — ele só marca a assinatura como ativa no banco de dados, pra você testar o fluxo. A integração com gateway de pagamento (Mercado Pago/Stripe) é o próximo passo.
+      </p>
+    </div>
+  );
+}
+
+function ToolsView() {
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header"><div><h1>Ferramentas</h1><p className="tf-muted">Calculadora de risco, simulador de metas e mais — chegando nessa área em breve.</p></div></div>
+    </div>
+  );
+}
+
+/* --------------------------- Login / Onboarding --------------------------- */
+
+function LoginScreen({ onAuth }) {
+  const [mode, setMode] = useState("login"); // login | signup
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(""); setInfo(""); setLoading(true);
+    if (mode === "login") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+    } else {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setError(error.message);
+      else setInfo("Conta criada! Se a confirmação de e-mail estiver ativa no seu projeto Supabase, verifique sua caixa de entrada antes de entrar.");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="tf-auth-screen">
+      <div className="tf-auth-card">
+        <div className="tf-brand tf-brand-center"><div className="tf-brand-name tf-brand-name-lg">TRADE<span className="text-blue">DOC</span></div></div>
+        <p className="tf-auth-tagline-brand">MENOS EMOÇÃO. <span className="text-blue">MAIS EXECUÇÃO.</span></p>
+
+        <form className="tf-form" onSubmit={submit}>
+          <div className="tf-form-row">
+            <label>E-mail</label>
+            <div className="tf-input-icon"><Mail size={15} /><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" required /></div>
+          </div>
+          <div className="tf-form-row">
+            <label>Senha</label>
+            <div className="tf-input-icon"><Lock size={15} /><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="mín. 6 caracteres" required minLength={6} /></div>
+          </div>
+          {error && <p className="text-coral" style={{ fontSize: 12.5, margin: 0 }}>{error}</p>}
+          {info && <p className="text-lime" style={{ fontSize: 12.5, margin: 0 }}>{info}</p>}
+          <button type="submit" className="tf-btn-primary tf-form-submit" disabled={loading}>
+            {loading ? "Aguarde..." : mode === "login" ? "Entrar" : "Criar conta"} <ArrowRight size={15} />
+          </button>
+        </form>
+        <button className="tf-skip-link" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+          {mode === "login" ? "Não tem conta? Criar agora →" : "Já tem conta? Entrar →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingScreen({ onComplete }) {
+  const [name, setName] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [balance, setBalance] = useState("12000");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    await onComplete(name, { name: accountName || "Minha conta", balance: parseFloat(balance.replace(",", ".")) || BASE_CAPITAL });
+    setSaving(false);
+  };
+
+  return (
+    <div className="tf-auth-screen">
+      <div className="tf-auth-card">
+        <h2 className="tf-onboarding-title">Vamos configurar sua conta</h2>
+        <form className="tf-form" onSubmit={submit}>
+          <div className="tf-form-row"><label>Seu nome</label><input value={name} onChange={(e) => setName(e.target.value)} required /></div>
+          <div className="tf-form-row"><label>Nome da conta de trading</label><input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Ex: Conta Real — Clear" required /></div>
+          <div className="tf-form-row"><label>Saldo inicial (R$)</label><input value={balance} onChange={(e) => setBalance(e.target.value)} inputMode="decimal" required /></div>
+          <button type="submit" className="tf-btn-primary tf-form-submit" disabled={saving}>{saving ? "Salvando..." : "Concluir"} <ArrowRight size={15} /></button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------- App ----------------------------------- */
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [profile, setProfile] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [trades, setTrades] = useState([]);
+  const [subscription, setSubscription] = useState(null);
+  const [active, setActive] = useState("dashboard");
+  const [showModal, setShowModal] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoadingSession(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setProfile(null); setAccounts([]); setTrades([]); return; }
+    loadUserData();
+  }, [session]);
+
+  async function loadUserData() {
+    const userId = session.user.id;
+    const { data: profileData } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+    setProfile(profileData || null);
+
+    const { data: accountsData } = await supabase.from("accounts").select("*").eq("user_id", userId).order("created_at");
+    setAccounts(accountsData || []);
+
+    const { data: tradesData } = await supabase.from("trades").select("*").eq("user_id", userId).order("trade_date", { ascending: false });
+    setTrades(tradesData || []);
+
+    const { data: subData } = await supabase.from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
+    setSubscription(subData || null);
+  }
+
+  const data = useDerivedData(trades);
+
+  const handleOnboardingComplete = async (name, firstAccount) => {
+    const userId = session.user.id;
+    await supabase.from("profiles").insert({ id: userId, name, email: session.user.email });
+    await supabase.from("accounts").insert({ user_id: userId, name: firstAccount.name, type: "Real", balance: firstAccount.balance, status: "Ativa" });
+    await loadUserData();
+  };
+
+  const handleNewTrade = async (trade) => {
+    const userId = session.user.id;
+    await supabase.from("trades").insert({ ...trade, user_id: userId });
+    const account = accounts.find((a) => a.id === trade.account_id);
+    if (account) {
+      await supabase.from("accounts").update({ balance: Number(account.balance) + trade.pnl }).eq("id", account.id);
+    }
+    await loadUserData();
+  };
+
+  const handleAddAccount = async (acc) => {
+    const userId = session.user.id;
+    await supabase.from("accounts").insert({ ...acc, user_id: userId });
+    await loadUserData();
+  };
+
+  const handleUpdateProfile = async (name) => {
+    await supabase.from("profiles").update({ name }).eq("id", session.user.id);
+    await loadUserData();
+  };
+
+  const handleSubscribe = async (planName) => {
+    const userId = session.user.id;
+    if (subscription) {
+      await supabase.from("subscriptions").update({ plan: planName, status: "active" }).eq("id", subscription.id);
+    } else {
+      await supabase.from("subscriptions").insert({ user_id: userId, plan: planName, status: "active" });
+    }
+    await loadUserData();
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setActive("dashboard");
+  };
+
+  if (loadingSession) {
+    return <div className="tf-app" style={{ alignItems: "center", justifyContent: "center" }}><p className="tf-muted">Carregando...</p></div>;
+  }
+
+  const view = (() => {
+    switch (active) {
+      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} />;
+      case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} />;
+      case "tools": return <ToolsView />;
+      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} />;
+      case "plans": return <PlansView currentPlan={subscription?.plan} onSubscribe={handleSubscribe} />;
+      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} />;
+    }
+  })();
+
+  return (
+    <div className="tf-app">
+      <style>{APP_STYLES}</style>
+      {!session && <LoginScreen />}
+      {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
+      {session && profile && (
+        <>
+          <Sidebar active={active} setActive={setActive} userName={profile.name} />
+          {view}
+          {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+const APP_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+.tf-app { --bg:#0D1117; --surface:#131922; --surface-2:#182130; --border:#232C3B; --text:#F5F7FA; --muted:#A0A6B2; --blue:#0070FF; --blue-dim:#0C3B7A; --lime:#1FA35C; --coral:#FF5C72; display:flex; min-height:100vh; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
+.tf-app * { box-sizing:border-box; }
+.text-lime{color:var(--lime);} .text-coral{color:var(--coral);} .text-blue{color:var(--blue);}
+.tf-mono{font-family:'JetBrains Mono',monospace;} .tf-muted{color:var(--muted);font-size:13px;} .tf-empty{color:var(--muted);font-size:13px;padding:10px 0;}
+.tf-sidebar{width:210px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 14px;}
+.tf-brand{padding:0 6px 22px;} .tf-brand-center{padding:0 0 6px;justify-content:center;text-align:center;}
+.tf-brand-name{font-family:'Exo 2',sans-serif;font-weight:700;font-size:16.5px;} .tf-brand-name-lg{font-size:22px;margin-top:6px;}
+.tf-nav{display:flex;flex-direction:column;gap:3px;flex:1;}
+.tf-nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;border:none;background:transparent;color:var(--muted);font-size:13.5px;font-weight:500;cursor:pointer;text-align:left;}
+.tf-nav-item:hover{background:var(--surface-2);color:var(--text);} .tf-nav-item.active{background:var(--blue-dim);color:#C9DAFF;}
+.tf-sidebar-footer{border-top:1px solid var(--border);padding-top:14px;}
+.tf-user-chip{display:flex;align-items:center;gap:8px;padding:6px 4px;background:none;border:none;cursor:pointer;width:100%;border-radius:7px;text-align:left;}
+.tf-user-chip:hover{background:var(--surface-2);}
+.tf-user-avatar{width:24px;height:24px;border-radius:50%;background:var(--blue-dim);color:#C9DAFF;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
+.tf-user-name{font-size:12.5px;font-weight:500;}
+.tf-view{flex:1;padding:26px 30px;overflow-y:auto;}
+.tf-view-header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px;}
+.tf-view-header h1{font-family:'Exo 2',sans-serif;font-size:22px;font-weight:600;margin:0 0 4px;}
+.tf-btn-primary{display:inline-flex;align-items:center;gap:6px;background:var(--lime);color:#10170A;border:none;padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;}
+.tf-btn-outline{padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;background:transparent;border:1px solid var(--border);color:var(--text);cursor:pointer;}
+.tf-btn-primary:disabled,.tf-btn-outline:disabled{opacity:.55;cursor:not-allowed;}
+.tf-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;}
+.tf-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.tf-card-head h3{font-family:'Exo 2',sans-serif;font-size:14.5px;font-weight:600;margin:0;}
+.tf-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
+.tf-stat{display:flex;flex-direction:column;gap:6px;} .tf-stat-top{display:flex;align-items:center;justify-content:space-between;}
+.tf-stat-label{font-size:12px;color:var(--muted);font-weight:500;}
+.tf-icon-badge{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;}
+.tone-up{background:rgba(31,163,92,0.12);color:var(--lime);} .tone-down{background:rgba(255,92,114,0.12);color:var(--coral);} .tone-neutral{background:rgba(0,112,255,0.14);color:#7FA6FF;}
+.tf-stat-value{font-family:'Exo 2',sans-serif;font-size:22px;font-weight:600;}
+.tf-hero-chart{margin-bottom:16px;} .tf-hero-value{font-family:'JetBrains Mono',monospace;font-size:15px;}
+.tf-two-col{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;}
+.tf-table-row{display:grid;grid-template-columns:1.2fr .8fr .8fr 1fr;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;align-items:center;}
+.tf-table-row:last-child{border-bottom:none;} .tf-table-head{color:var(--muted);font-size:11.5px;text-transform:uppercase;}
+.tf-asset{font-weight:600;}
+.tf-trade-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.tf-trade-row:last-child{border-bottom:none;} .tf-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.dot-lime{background:var(--lime);} .dot-coral{background:var(--coral);} .tf-trade-date{width:42px;} .tf-trade-side{flex:1;color:var(--muted);} .tf-trade-pnl{min-width:70px;text-align:right;}
+.tf-accounts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.tf-account-card{display:flex;flex-direction:column;gap:8px;} .tf-account-top{display:flex;align-items:center;justify-content:space-between;}
+.tf-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:20px;text-transform:uppercase;}
+.badge-blue{background:rgba(0,112,255,0.18);color:#7FA6FF;} .badge-outline{border:1px solid var(--border);color:var(--muted);}
+.tf-account-name{font-size:14px;font-weight:600;margin:2px 0 0;font-family:'Exo 2',sans-serif;}
+.tf-account-balance{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:600;}
+.tf-account-status{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin-top:2px;}
+.tf-plans-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;max-width:620px;}
+.tf-plan-card{position:relative;display:flex;flex-direction:column;gap:12px;}
+.plan-highlight{border-color:var(--lime);} .tf-plan-tag{position:absolute;top:-10px;right:16px;background:var(--lime);color:#10170A;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;}
+.tf-plan-tag-active{background:var(--blue);color:#fff;}
+.tf-plan-card h3{font-family:'Exo 2',sans-serif;font-size:16px;margin:6px 0 0;}
+.tf-plan-price{font-family:'Exo 2',sans-serif;font-size:28px;font-weight:700;} .tf-plan-price span{font-size:13px;font-weight:500;margin-left:3px;}
+.tf-plan-features{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px;}
+.tf-plan-features li{display:flex;align-items:center;gap:7px;font-size:13px;}
+.tf-auth-screen{flex:1;display:flex;align-items:center;justify-content:center;padding:30px;min-height:100vh;}
+.tf-auth-card{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 26px;text-align:center;}
+.tf-auth-tagline-brand{font-family:'Exo 2',sans-serif;font-weight:700;font-size:11px;letter-spacing:.06em;margin:2px 0 14px;}
+.tf-onboarding-title{font-family:'Exo 2',sans-serif;font-size:17px;margin:0 0 14px;}
+.tf-form{display:flex;flex-direction:column;gap:12px;text-align:left;}
+.tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
+.tf-form-row input,.tf-form-row select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13.5px;outline:none;width:100%;color-scheme:dark;}
+.tf-form-row-inline{display:grid;grid-template-columns:1fr 1fr;gap:12px;} .tf-form-inline-3{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:12px;align-items:end;}
+.tf-input-icon{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0 11px;}
+.tf-input-icon svg{color:var(--muted);} .tf-input-icon input{background:transparent;border:none;padding:9px 0;color-scheme:dark;}
+.tf-toggle-group{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.tf-toggle-group button{flex:1;padding:8px 0;background:var(--surface-2);border:none;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;}
+.tf-toggle-group button.active{background:var(--blue-dim);color:#C9DAFF;}
+.tf-toggle-group button.active.tone-win{background:rgba(31,163,92,0.18);color:var(--lime);}
+.tf-toggle-group button.active.tone-loss{background:rgba(255,92,114,0.18);color:var(--coral);}
+.tf-form-submit{justify-content:center;margin-top:4px;}
+.tf-skip-link{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;margin-top:12px;text-decoration:underline;}
+.tf-modal-overlay{position:fixed;inset:0;background:rgba(5,7,12,0.6);display:flex;align-items:center;justify-content:center;z-index:20;}
+.tf-modal{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin:20px;}
+.tf-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.tf-modal-head h3{font-family:'Exo 2',sans-serif;font-size:15.5px;margin:0;}
+.tf-icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.tf-logout-btn{display:inline-flex;align-items:center;gap:7px;color:var(--coral);}
+`;
