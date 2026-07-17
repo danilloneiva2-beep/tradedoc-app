@@ -705,8 +705,8 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setAct
 
 function PlansView({ currentPlan, onSubscribe }) {
   const plans = [
-    { name: "Starter", price: "R$ 39", period: "/mês", features: ["1 conta conectada", "Diário de trades ilimitado", "Relatórios básicos"] },
-    { name: "Pro", price: "R$ 390", period: "/ano", highlight: true, features: ["Contas ilimitadas", "Analytics avançado", "Suporte prioritário"] },
+    { name: "Starter", price: "R$ 29,90", period: "/mês", features: ["1 conta conectada", "Diário de trades ilimitado", "Relatórios básicos"] },
+    { name: "Pro", price: "R$ 59,90", period: "/mês", highlight: true, features: ["Contas ilimitadas", "Analytics avançado", "Suporte prioritário"] },
   ];
   return (
     <div className="tf-view">
