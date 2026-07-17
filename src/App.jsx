@@ -6,6 +6,7 @@ import {
   LayoutDashboard, CalendarDays, Wallet, Wrench, CreditCard, TrendingUp,
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
+  Pencil, Trash2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -150,13 +151,13 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
 
 /* ---------------------------- New trade modal ---------------------------- */
 
-function NewTradeModal({ onClose, onSubmit, accounts, initialDate }) {
-  const [asset, setAsset] = useState("WINFUT");
-  const [side, setSide] = useState("Compra");
-  const [amount, setAmount] = useState("");
-  const [outcome, setOutcome] = useState("win");
-  const [date, setDate] = useState(initialDate || new Date().toISOString().slice(0, 10));
-  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) {
+  const [asset, setAsset] = useState(editTrade?.asset || "WINFUT");
+  const [side, setSide] = useState(editTrade?.side || "Compra");
+  const [amount, setAmount] = useState(editTrade ? String(Math.abs(Number(editTrade.pnl))) : "");
+  const [outcome, setOutcome] = useState(editTrade ? (Number(editTrade.pnl) >= 0 ? "win" : "loss") : "win");
+  const [date, setDate] = useState(editTrade?.trade_date || initialDate || new Date().toISOString().slice(0, 10));
+  const [accountId, setAccountId] = useState(editTrade?.account_id || accounts[0]?.id || "");
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -174,7 +175,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate }) {
     <div className="tf-modal-overlay" onClick={onClose}>
       <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="tf-modal-head">
-          <h3>Registrar trade</h3>
+          <h3>{editTrade ? "Editar trade" : "Registrar trade"}</h3>
           <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="tf-form">
@@ -215,7 +216,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate }) {
             </select>
           </div>
           <button type="submit" className="tf-btn-primary tf-form-submit" disabled={saving}>
-            <Plus size={15} /> {saving ? "Salvando..." : "Salvar trade"}
+            <Plus size={15} /> {saving ? "Salvando..." : editTrade ? "Salvar alterações" : "Salvar trade"}
           </button>
         </form>
       </div>
@@ -225,7 +226,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate }) {
 
 /* -------------------------------- Views --------------------------------- */
 
-function DashboardView({ data, onOpenModal }) {
+function DashboardView({ data, onOpenModal, onEditTrade, onDeleteTrade }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
   return (
     <div className="tf-view">
@@ -308,12 +309,14 @@ function DashboardView({ data, onOpenModal }) {
           <div className="tf-trade-list">
             {recentTrades.length === 0 && <div className="tf-empty">Nenhum trade registrado ainda.</div>}
             {recentTrades.map((t) => (
-              <div className="tf-trade-row" key={t.id}>
+              <div className="tf-trade-row tf-trade-row-editable" key={t.id}>
                 <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
                 <span className="tf-muted tf-mono tf-trade-date">{t.trade_date.slice(8,10)}/{t.trade_date.slice(5,7)}</span>
                 <span className="tf-asset">{t.asset}</span>
                 <span className="tf-muted tf-trade-side">{t.side}</span>
                 <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                <button type="button" className="tf-row-action" onClick={() => onEditTrade(t)} title="Editar"><Pencil size={13} /></button>
+                <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => onDeleteTrade(t)} title="Apagar"><Trash2 size={13} /></button>
               </div>
             ))}
           </div>
@@ -323,7 +326,7 @@ function DashboardView({ data, onOpenModal }) {
   );
 }
 
-function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade }) {
+function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade, onDeleteTrade }) {
   const total = dayTrades.reduce((s, t) => s + Number(t.pnl), 0);
   return (
     <div className="tf-modal-overlay" onClick={onClose}>
@@ -340,11 +343,13 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade }) {
             </div>
             <div className="tf-trade-list" style={{ marginBottom: 14 }}>
               {dayTrades.map((t) => (
-                <div className="tf-trade-row" key={t.id}>
+                <div className="tf-trade-row tf-trade-row-editable" key={t.id}>
                   <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
                   <span className="tf-asset">{t.asset}</span>
                   <span className="tf-muted tf-trade-side">{t.side}</span>
                   <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                  <button type="button" className="tf-row-action" onClick={() => onEditTrade(t)} title="Editar"><Pencil size={13} /></button>
+                  <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => onDeleteTrade(t)} title="Apagar"><Trash2 size={13} /></button>
                 </div>
               ))}
             </div>
@@ -361,7 +366,7 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade }) {
 const WEEKDAY_LABELS = ["dom","seg","ter","qua","qui","sex","sáb"];
 const MONTH_LABELS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
-function CalendarView({ trades, accounts, onNewTrade }) {
+function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade }) {
   const [monthDate, setMonthDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null);
   const [addingForDay, setAddingForDay] = useState(null);
@@ -393,14 +398,14 @@ function CalendarView({ trades, accounts, onNewTrade }) {
   };
 
   const dayKey = (d) => `${monthPrefix}-${String(d).padStart(2, "0")}`;
-  const selectedDayTrades = selectedDay ? monthTrades.filter((t) => t.trade_date === dayKey(selectedDay)) : [];
+  const selectedDayTrades = selectedDay ? trades.filter((t) => t.trade_date === dayKey(selectedDay)) : [];
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
         <div>
           <h1>Calendário de trades</h1>
-          <p className="tf-muted">Resultado diário consolidado · clique num dia para ver detalhes</p>
+          <p className="tf-muted">Resultado diário consolidado · clique num dia para ver, editar ou apagar</p>
         </div>
         <div className="tf-month-nav">
           <button className="tf-icon-btn" onClick={() => setMonthDate(new Date(year, month - 1, 1))}><ChevronLeft size={16} /></button>
@@ -441,6 +446,8 @@ function CalendarView({ trades, accounts, onNewTrade }) {
           dateLabel={`${String(selectedDay).padStart(2, "0")} de ${MONTH_LABELS[month]}`}
           onClose={() => setSelectedDay(null)}
           onAddTrade={() => setAddingForDay(selectedDay)}
+          onEditTrade={(trade) => { setSelectedDay(null); onEditTrade(trade); }}
+          onDeleteTrade={onDeleteTrade}
         />
       )}
 
@@ -449,7 +456,7 @@ function CalendarView({ trades, accounts, onNewTrade }) {
           initialDate={dayKey(addingForDay)}
           accounts={accounts}
           onClose={() => setAddingForDay(null)}
-          onSubmit={async (trade) => { await onNewTrade(trade); setAddingForDay(null); setSelectedDay(null); }}
+          onSubmit={async (trade) => { await onNewTrade(trade); setAddingForDay(null); }}
         />
       )}
     </div>
@@ -714,6 +721,7 @@ export default function App() {
   const [active, setActive] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [editingTrade, setEditingTrade] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -765,6 +773,47 @@ export default function App() {
     await loadUserData();
   };
 
+  const handleUpdateTrade = async (original, updated) => {
+    await supabase.from("trades").update(updated).eq("id", original.id);
+
+    const oldPnl = Number(original.pnl);
+    const newPnl = Number(updated.pnl);
+
+    if (original.account_id === updated.account_id) {
+      // Same account: apply just the difference
+      const account = accounts.find((a) => a.id === updated.account_id);
+      if (account) {
+        await supabase.from("accounts").update({ balance: Number(account.balance) - oldPnl + newPnl }).eq("id", account.id);
+      }
+    } else {
+      // Moved to a different account: reverse from the old one, apply to the new one
+      const oldAccount = accounts.find((a) => a.id === original.account_id);
+      const newAccount = accounts.find((a) => a.id === updated.account_id);
+      if (oldAccount) {
+        await supabase.from("accounts").update({ balance: Number(oldAccount.balance) - oldPnl }).eq("id", oldAccount.id);
+      }
+      if (newAccount) {
+        await supabase.from("accounts").update({ balance: Number(newAccount.balance) + newPnl }).eq("id", newAccount.id);
+      }
+    }
+    await loadUserData();
+  };
+
+  const handleDeleteTrade = async (trade) => {
+    await supabase.from("trades").delete().eq("id", trade.id);
+    const account = accounts.find((a) => a.id === trade.account_id);
+    if (account) {
+      await supabase.from("accounts").update({ balance: Number(account.balance) - Number(trade.pnl) }).eq("id", account.id);
+    }
+    await loadUserData();
+  };
+
+  const confirmAndDeleteTrade = async (trade) => {
+    if (window.confirm(`Apagar o trade de ${trade.asset} (${fmtBRL(Number(trade.pnl))})? Essa ação não pode ser desfeita.`)) {
+      await handleDeleteTrade(trade);
+    }
+  };
+
   const handleAddAccount = async (acc) => {
     const userId = session.user.id;
     await supabase.from("accounts").insert({ ...acc, user_id: userId });
@@ -797,13 +846,13 @@ export default function App() {
 
   const view = (() => {
     switch (active) {
-      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} />;
-      case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} />;
+      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
+      case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} onSubscribe={handleSubscribe} />;
-      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} />;
+      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
     }
   })();
 
@@ -827,6 +876,14 @@ export default function App() {
           />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
+          {editingTrade && (
+            <NewTradeModal
+              editTrade={editingTrade}
+              accounts={accounts}
+              onClose={() => setEditingTrade(null)}
+              onSubmit={async (updatedFields) => { await handleUpdateTrade(editingTrade, updatedFields); setEditingTrade(null); }}
+            />
+          )}
         </>
       )}
     </div>
@@ -873,6 +930,10 @@ const APP_STYLES = `
 .tf-trade-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
 .tf-trade-row:last-child{border-bottom:none;} .tf-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 .dot-lime{background:var(--lime);} .dot-coral{background:var(--coral);} .tf-trade-date{width:42px;} .tf-trade-side{flex:1;color:var(--muted);} .tf-trade-pnl{min-width:70px;text-align:right;}
+.tf-trade-row-editable .tf-trade-pnl{min-width:auto;}
+.tf-row-action{background:var(--surface-2);border:1px solid var(--border);color:var(--muted);width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
+.tf-row-action:hover{color:var(--text);border-color:var(--blue);}
+.tf-row-action-danger:hover{color:var(--coral);border-color:var(--coral);}
 .tf-accounts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
 .tf-account-card{display:flex;flex-direction:column;gap:8px;} .tf-account-top{display:flex;align-items:center;justify-content:space-between;}
 .tf-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:20px;text-transform:uppercase;}
