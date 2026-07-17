@@ -81,6 +81,7 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
 function Sidebar({ active, setActive, userName }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "calendar", label: "Calendário", icon: CalendarDays },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
     { id: "profile", label: "Perfil", icon: User },
@@ -112,12 +113,12 @@ function Sidebar({ active, setActive, userName }) {
 
 /* ---------------------------- New trade modal ---------------------------- */
 
-function NewTradeModal({ onClose, onSubmit, accounts }) {
+function NewTradeModal({ onClose, onSubmit, accounts, initialDate }) {
   const [asset, setAsset] = useState("WINFUT");
   const [side, setSide] = useState("Compra");
   const [amount, setAmount] = useState("");
   const [outcome, setOutcome] = useState("win");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(initialDate || new Date().toISOString().slice(0, 10));
   const [accountId, setAccountId] = useState(accounts[0]?.id || "");
   const [saving, setSaving] = useState(false);
 
@@ -257,6 +258,139 @@ function DashboardView({ data, onOpenModal }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade }) {
+  const total = dayTrades.reduce((s, t) => s + Number(t.pnl), 0);
+  return (
+    <div className="tf-modal-overlay" onClick={onClose}>
+      <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="tf-modal-head">
+          <h3>{dateLabel}</h3>
+          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        {dayTrades.length > 0 ? (
+          <>
+            <div className="tf-daymodal-total">
+              <span className="tf-muted">Total do dia</span>
+              <span className={`tf-mono ${total >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(total)}</span>
+            </div>
+            <div className="tf-trade-list" style={{ marginBottom: 14 }}>
+              {dayTrades.map((t) => (
+                <div className="tf-trade-row" key={t.id}>
+                  <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
+                  <span className="tf-asset">{t.asset}</span>
+                  <span className="tf-muted tf-trade-side">{t.side}</span>
+                  <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="tf-empty" style={{ marginBottom: 14 }}>Nenhum trade registrado neste dia.</p>
+        )}
+        <button className="tf-btn-primary tf-form-submit" onClick={onAddTrade}><Plus size={15} /> Adicionar trade neste dia</button>
+      </div>
+    </div>
+  );
+}
+
+const WEEKDAY_LABELS = ["dom","seg","ter","qua","qui","sex","sáb"];
+const MONTH_LABELS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+function CalendarView({ trades, accounts, onNewTrade }) {
+  const [monthDate, setMonthDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [addingForDay, setAddingForDay] = useState(null);
+
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startWeekday = new Date(year, month, 1).getDay();
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+  const monthTrades = trades.filter((t) => t.trade_date.startsWith(monthPrefix));
+  const calendarPnL = {};
+  monthTrades.forEach((t) => {
+    const day = Number(t.trade_date.slice(8, 10));
+    calendarPnL[day] = (calendarPnL[day] || 0) + Number(t.pnl);
+  });
+  const monthTotal = Object.values(calendarPnL).reduce((s, v) => s + v, 0);
+
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const intensity = (v) => {
+    if (v === undefined) return "empty";
+    const abs = Math.abs(v);
+    if (abs > 450) return v > 0 ? "lime-3" : "coral-3";
+    if (abs > 200) return v > 0 ? "lime-2" : "coral-2";
+    return v > 0 ? "lime-1" : "coral-1";
+  };
+
+  const dayKey = (d) => `${monthPrefix}-${String(d).padStart(2, "0")}`;
+  const selectedDayTrades = selectedDay ? monthTrades.filter((t) => t.trade_date === dayKey(selectedDay)) : [];
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div>
+          <h1>Calendário de trades</h1>
+          <p className="tf-muted">Resultado diário consolidado · clique num dia para ver detalhes</p>
+        </div>
+        <div className="tf-month-nav">
+          <button className="tf-icon-btn" onClick={() => setMonthDate(new Date(year, month - 1, 1))}><ChevronLeft size={16} /></button>
+          <span className="tf-month-label">{MONTH_LABELS[month]} {year}</span>
+          <button className="tf-icon-btn" onClick={() => setMonthDate(new Date(year, month + 1, 1))}><ChevronRight size={16} /></button>
+        </div>
+      </div>
+
+      <div className="tf-card">
+        <div className="tf-card-head">
+          <h3>{MONTH_LABELS[month]}</h3>
+          <span className={`tf-mono ${monthTotal >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(monthTotal)}</span>
+        </div>
+        <div className="tf-cal-weekdays">{WEEKDAY_LABELS.map((w) => <span key={w}>{w}</span>)}</div>
+        <div className="tf-cal-grid">
+          {cells.map((d, i) => (
+            <button
+              key={i}
+              type="button"
+              disabled={!d}
+              onClick={() => d && setSelectedDay(d)}
+              className={`tf-cal-cell ${d ? "has-day" : ""} tone-${intensity(calendarPnL[d])}`}
+            >
+              {d && (
+                <>
+                  <span className="tf-cal-day">{d}</span>
+                  {calendarPnL[d] !== undefined && <span className="tf-cal-pnl">{fmtBRL(calendarPnL[d])}</span>}
+                </>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {selectedDay && !addingForDay && (
+        <DayDetailModal
+          dayTrades={selectedDayTrades}
+          dateLabel={`${String(selectedDay).padStart(2, "0")} de ${MONTH_LABELS[month]}`}
+          onClose={() => setSelectedDay(null)}
+          onAddTrade={() => setAddingForDay(selectedDay)}
+        />
+      )}
+
+      {addingForDay && (
+        <NewTradeModal
+          initialDate={dayKey(addingForDay)}
+          accounts={accounts}
+          onClose={() => setAddingForDay(null)}
+          onSubmit={async (trade) => { await onNewTrade(trade); setAddingForDay(null); setSelectedDay(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -602,6 +736,7 @@ export default function App() {
   const view = (() => {
     switch (active) {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} />;
+      case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} />;
@@ -704,4 +839,20 @@ const APP_STYLES = `
 .tf-modal-head h3{font-family:'Exo 2',sans-serif;font-size:15.5px;margin:0;}
 .tf-icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .tf-logout-btn{display:inline-flex;align-items:center;gap:7px;color:var(--coral);}
+.tf-month-nav{display:flex;align-items:center;gap:10px;}
+.tf-month-label{font-family:'Exo 2',sans-serif;font-weight:600;font-size:14px;}
+.tf-cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;}
+.tf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.tf-cal-cell{aspect-ratio:1;border-radius:8px;background:var(--surface-2);padding:6px 7px;display:flex;flex-direction:column;justify-content:space-between;border:1px solid transparent;font-family:'Inter',sans-serif;text-align:left;width:100%;cursor:default;}
+.tf-cal-cell.has-day{border-color:var(--border);cursor:pointer;} .tf-cal-cell.has-day:hover{border-color:var(--blue);}
+.tf-cal-day{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;}
+.tf-cal-pnl{font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;}
+.tone-lime-1{background:rgba(31,163,92,0.10);} .tone-lime-1 .tf-cal-pnl{color:#7BD79E;}
+.tone-lime-2{background:rgba(31,163,92,0.20);} .tone-lime-2 .tf-cal-pnl{color:var(--lime);}
+.tone-lime-3{background:rgba(31,163,92,0.32);} .tone-lime-3 .tf-cal-pnl{color:var(--lime);}
+.tone-coral-1{background:rgba(255,92,114,0.10);} .tone-coral-1 .tf-cal-pnl{color:#FF9CAB;}
+.tone-coral-2{background:rgba(255,92,114,0.20);} .tone-coral-2 .tf-cal-pnl{color:var(--coral);}
+.tone-coral-3{background:rgba(255,92,114,0.32);} .tone-coral-3 .tf-cal-pnl{color:var(--coral);}
+.tone-empty{background:transparent;}
+.tf-daymodal-total{display:flex;align-items:center;justify-content:space-between;padding:10px 0;margin-bottom:8px;border-bottom:1px solid var(--border);font-size:13.5px;}
 `;
