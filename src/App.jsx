@@ -5,7 +5,7 @@ import {
 import {
   LayoutDashboard, CalendarDays, Wallet, Wrench, CreditCard, TrendingUp,
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
-  Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight,
+  Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -78,7 +78,7 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
   );
 }
 
-function Sidebar({ active, setActive, userName }) {
+function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
@@ -87,27 +87,37 @@ function Sidebar({ active, setActive, userName }) {
     { id: "profile", label: "Perfil", icon: User },
     { id: "plans", label: "Planos", icon: CreditCard },
   ];
+
+  const handleSelect = (id) => {
+    setActive(id);
+    onClose && onClose();
+  };
+
   return (
-    <aside className="tf-sidebar">
-      <div className="tf-brand">
-        <div className="tf-brand-name">TRADE<span className="text-blue">DOC</span></div>
-      </div>
-      <nav className="tf-nav">
-        {items.map((it) => (
-          <button key={it.id} onClick={() => setActive(it.id)} className={`tf-nav-item ${active === it.id ? "active" : ""}`}>
-            <it.icon size={17} /><span>{it.label}</span>
-          </button>
-        ))}
-      </nav>
-      <div className="tf-sidebar-footer">
-        {userName && (
-          <button className="tf-user-chip" onClick={() => setActive("profile")}>
-            <span className="tf-user-avatar">{userName.charAt(0).toUpperCase()}</span>
-            <span className="tf-user-name">{userName}</span>
-          </button>
-        )}
-      </div>
-    </aside>
+    <>
+      {mobileOpen && <div className="tf-sidebar-backdrop" onClick={onClose} />}
+      <aside className={`tf-sidebar ${mobileOpen ? "mobile-open" : ""}`}>
+        <div className="tf-brand">
+          <div className="tf-brand-name">TRADE<span className="text-blue">DOC</span></div>
+          <button className="tf-sidebar-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <nav className="tf-nav">
+          {items.map((it) => (
+            <button key={it.id} onClick={() => handleSelect(it.id)} className={`tf-nav-item ${active === it.id ? "active" : ""}`}>
+              <it.icon size={17} /><span>{it.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="tf-sidebar-footer">
+          {userName && (
+            <button className="tf-user-chip" onClick={() => handleSelect("profile")}>
+              <span className="tf-user-avatar">{userName.charAt(0).toUpperCase()}</span>
+              <span className="tf-user-name">{userName}</span>
+            </button>
+          )}
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -651,6 +661,7 @@ export default function App() {
   const [trades, setTrades] = useState([]);
   const [subscription, setSubscription] = useState(null);
   const [active, setActive] = useState("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
@@ -753,9 +764,16 @@ export default function App() {
       {session && profile && (
         <>
           <div className="tf-mobile-topbar">
+            <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)}><Menu size={20} /></button>
             <span className="tf-brand-name">TRADE<span className="text-blue">DOC</span></span>
           </div>
-          <Sidebar active={active} setActive={setActive} userName={profile.name} />
+          <Sidebar
+            active={active}
+            setActive={setActive}
+            userName={profile.name}
+            mobileOpen={mobileNavOpen}
+            onClose={() => setMobileNavOpen(false)}
+          />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
         </>
@@ -861,33 +879,48 @@ const APP_STYLES = `
 
 /* Mobile top bar (hidden on desktop) */
 .tf-mobile-topbar{display:none;}
+.tf-hamburger-btn{display:none;}
+.tf-sidebar-close{display:none;}
+.tf-sidebar-backdrop{display:none;}
 
 /* ===================== RESPONSIVE ===================== */
 html, body { overflow-x: hidden; max-width: 100%; }
 
 @media (max-width: 860px) {
-  .tf-app { flex-direction: row; min-height: 100vh; }
+  .tf-app { flex-direction: column; min-height: 100vh; }
 
   .tf-mobile-topbar{
-    display:flex; align-items:center; justify-content:center;
+    display:flex; align-items:center; gap:12px;
     padding:14px 16px; background:var(--surface); border-bottom:1px solid var(--border);
-    position:fixed; top:0; left:64px; right:0; z-index:15;
+    position:sticky; top:0; z-index:15;
+  }
+  .tf-hamburger-btn{
+    display:flex; align-items:center; justify-content:center;
+    width:34px; height:34px; border-radius:8px; background:var(--surface-2);
+    border:1px solid var(--border); color:var(--text); cursor:pointer; flex-shrink:0;
   }
 
-  /* Sidebar becomes a fixed narrow icon rail on the left */
+  /* Sidebar becomes an off-canvas drawer, hidden until opened */
   .tf-sidebar{
-    position:fixed; top:0; left:0; bottom:0; width:64px; height:100vh;
-    flex-direction:column; padding:14px 6px calc(14px + env(safe-area-inset-bottom));
-    border-right:1px solid var(--border); border-top:none; z-index:20;
-    align-items:center;
+    position:fixed; top:0; left:0; bottom:0; width:250px; max-width:80vw; height:100vh;
+    transform:translateX(-100%); transition:transform .25s ease;
+    border-right:1px solid var(--border); z-index:30;
+    padding:20px 14px calc(20px + env(safe-area-inset-bottom));
   }
-  .tf-brand, .tf-sidebar-footer { display:none; }
-  .tf-nav{ flex-direction:column; justify-content:flex-start; gap:8px; width:100%; }
-  .tf-nav-item{ flex-direction:column; gap:3px; padding:9px 2px; font-size:9.5px; text-align:center; border-radius:10px; }
-  .tf-nav-item span{ font-size:9px; line-height:1.1; }
+  .tf-sidebar.mobile-open{ transform:translateX(0); box-shadow:8px 0 24px rgba(0,0,0,0.4); }
+  .tf-sidebar-backdrop{
+    display:block; position:fixed; inset:0; background:rgba(5,7,12,0.6); z-index:25;
+  }
+  .tf-brand{ display:flex; align-items:center; justify-content:space-between; }
+  .tf-sidebar-close{
+    display:flex; align-items:center; justify-content:center;
+    width:30px; height:30px; border-radius:8px; background:var(--surface-2);
+    border:1px solid var(--border); color:var(--text); cursor:pointer;
+  }
+  .tf-sidebar-footer{ display:flex; }
 
-  /* Push content to the right of the rail, below the top bar */
-  .tf-view{ margin-left:64px; padding:70px 16px 24px; }
+  /* Content takes the full width; no permanent offset since the drawer overlays */
+  .tf-view{ padding:20px 16px 24px; }
 
   /* Grids collapse to fewer columns */
   .tf-stats-grid{ grid-template-columns:repeat(2,1fr); gap:10px; }
@@ -923,6 +956,11 @@ html, body { overflow-x: hidden; max-width: 100%; }
   .tf-auth-card{ max-width:100%; padding:24px 20px; }
 
   .tf-hero-value{ font-size:13px; }
+
+  /* iOS auto-zooms inputs with font-size below 16px on focus — force 16px to prevent it */
+  .tf-form-row input, .tf-form-row select, .tf-input-icon input {
+    font-size: 16px !important;
+  }
 }
 
 @media (max-width: 380px) {
