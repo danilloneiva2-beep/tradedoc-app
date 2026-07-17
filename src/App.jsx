@@ -847,6 +847,22 @@ export default function App() {
     });
   };
 
+  // iOS Safari reveals the browser's default white background during the
+  // "bounce"/elastic overscroll effect. Keep html/body painted the same
+  // color as the app so that effect never shows a white flash.
+  useEffect(() => {
+    const bg = theme === "light" ? "#F5F7FA" : "#0D1117";
+    document.documentElement.style.backgroundColor = bg;
+    document.body.style.backgroundColor = bg;
+    let meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.name = "theme-color";
+      document.head.appendChild(meta);
+    }
+    meta.content = bg;
+  }, [theme]);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -1035,7 +1051,7 @@ export default function App() {
 
 const APP_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-.tf-app { --bg:#0D1117; --surface:#131922; --surface-2:#182130; --border:#232C3B; --text:#F5F7FA; --muted:#A0A6B2; --blue:#0070FF; --blue-dim:#0C3B7A; --lime:#1FA35C; --coral:#FF5C72; display:flex; min-height:100vh; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
+.tf-app { --bg:#0D1117; --surface:#131922; --surface-2:#182130; --border:#232C3B; --text:#F5F7FA; --muted:#A0A6B2; --blue:#0070FF; --blue-dim:#0C3B7A; --lime:#1FA35C; --coral:#FF5C72; display:flex; min-height:100vh; min-height:100dvh; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
 .tf-app * { box-sizing:border-box; }
 .text-lime{color:var(--lime);} .text-coral{color:var(--coral);} .text-blue{color:var(--blue);}
 .tf-mono{font-family:'JetBrains Mono',monospace;} .tf-muted{color:var(--muted);font-size:13px;} .tf-empty{color:var(--muted);font-size:13px;padding:10px 0;}
@@ -1188,7 +1204,7 @@ const APP_STYLES = `
 .tf-sidebar-backdrop{display:none;}
 
 /* ===================== RESPONSIVE ===================== */
-html, body { overflow-x: hidden; max-width: 100%; }
+html, body { overflow-x: hidden; max-width: 100%; background: #0D1117; }
 
 @media (max-width: 860px) {
   .tf-app { flex-direction: column; min-height: 100vh; }
