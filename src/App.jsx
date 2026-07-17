@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, Wallet, Wrench, CreditCard, TrendingUp,
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
-  Pencil, Trash2,
+  Pencil, Trash2, Filter, Sun, Moon,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -226,13 +226,63 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
 
 /* -------------------------------- Views --------------------------------- */
 
-function DashboardView({ data, onOpenModal, onEditTrade, onDeleteTrade }) {
+function AccountFilterDropdown({ accounts, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const allSelected = selected.length === 0;
+  const toggleAccount = (id) => {
+    if (selected.includes(id)) onChange(selected.filter((x) => x !== id));
+    else onChange([...selected, id]);
+  };
+
+  const label = allSelected
+    ? "Todas as contas"
+    : selected.length === 1
+      ? accounts.find((a) => a.id === selected[0])?.name || "1 conta"
+      : `${selected.length} contas`;
+
+  return (
+    <div className="tf-filter-wrap" ref={ref}>
+      <button type="button" className={`tf-btn-outline tf-filter-btn ${!allSelected ? "tf-filter-active" : ""}`} onClick={() => setOpen((v) => !v)}>
+        <Filter size={15} /> {label}
+      </button>
+      {open && (
+        <div className="tf-filter-dropdown">
+          <button type="button" className={`tf-filter-item ${allSelected ? "checked" : ""}`} onClick={() => onChange([])}>
+            <span className="tf-filter-check">{allSelected && <Check size={12} />}</span> Todas as contas
+          </button>
+          <div className="tf-filter-divider" />
+          {accounts.map((a) => (
+            <button type="button" key={a.id} className={`tf-filter-item ${selected.includes(a.id) ? "checked" : ""}`} onClick={() => toggleAccount(a.id)}>
+              <span className="tf-filter-check">{selected.includes(a.id) && <Check size={12} />}</span> {a.name}
+            </button>
+          ))}
+          {accounts.length === 0 && <p className="tf-empty" style={{ padding: "6px 10px" }}>Nenhuma conta cadastrada.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DashboardView({ data, onOpenModal, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
   return (
     <div className="tf-view">
       <div className="tf-view-header">
         <div><h1>Visão geral</h1><p className="tf-muted">Sua performance consolidada</p></div>
-        <button className="tf-btn-primary" onClick={onOpenModal}><Plus size={15} /> Novo trade</button>
+        <div className="tf-view-header-actions">
+          <AccountFilterDropdown accounts={accounts} selected={accountFilter} onChange={setAccountFilter} />
+          <button className="tf-btn-primary" onClick={onOpenModal}><Plus size={15} /> Novo trade</button>
+        </div>
       </div>
 
       <div className="tf-stats-grid">
@@ -463,7 +513,66 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
   );
 }
 
-function AccountsView({ accounts, onAddAccount }) {
+function AccountCard({ account, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(account.name);
+  const [balance, setBalance] = useState(String(account.balance));
+  const [type, setType] = useState(account.type);
+  const [status, setStatus] = useState(account.status);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    const bal = parseFloat(balance.replace(",", ".")) || 0;
+    await onUpdate(account.id, { name: name || "Conta", type, balance: bal, status: status || "Ativa" });
+    setSaving(false);
+    setEditing(false);
+  };
+
+  const handleDelete = () => {
+    if (window.confirm(`Apagar a conta "${account.name}"? Todos os trades registrados nela também serão apagados. Essa ação não pode ser desfeita.`)) {
+      onDelete(account.id);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="tf-card tf-account-card">
+        <form onSubmit={submit} className="tf-form">
+          <div className="tf-form-row"><label>Nome da conta</label><input value={name} onChange={(e) => setName(e.target.value)} required /></div>
+          <div className="tf-form-row-inline">
+            <div className="tf-form-row"><label>Saldo (R$)</label><input value={balance} onChange={(e) => setBalance(e.target.value)} inputMode="decimal" required /></div>
+            <div className="tf-form-row"><label>Tipo</label><select value={type} onChange={(e) => setType(e.target.value)}><option>Real</option><option>Prop Firm</option></select></div>
+          </div>
+          <div className="tf-form-row"><label>Status</label><input value={status} onChange={(e) => setStatus(e.target.value)} placeholder="Ex: Ativa, Fase 2..." /></div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="tf-btn-outline" onClick={() => setEditing(false)}>Cancelar</button>
+            <button type="submit" className="tf-btn-primary" disabled={saving}>{saving ? "Salvando..." : "Salvar"}</button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="tf-card tf-account-card">
+      <div className="tf-account-top">
+        <span className="tf-icon-badge tone-neutral"><Building2 size={16} /></span>
+        <span className={`tf-badge ${account.type === "Prop Firm" ? "badge-blue" : "badge-outline"}`}>{account.type}</span>
+      </div>
+      <h3 className="tf-account-name">{account.name}</h3>
+      <div className="tf-account-balance">R$ {Number(account.balance).toLocaleString("pt-BR")}</div>
+      <div className="tf-account-status"><ShieldCheck size={13} className="text-lime" /> {account.status}</div>
+      <div className="tf-account-actions">
+        <button type="button" className="tf-row-action" onClick={() => setEditing(true)} title="Editar"><Pencil size={13} /> Editar</button>
+        <button type="button" className="tf-row-action tf-row-action-danger" onClick={handleDelete} title="Apagar"><Trash2 size={13} /> Apagar</button>
+      </div>
+    </div>
+  );
+}
+
+function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [balance, setBalance] = useState("");
@@ -503,15 +612,7 @@ function AccountsView({ accounts, onAddAccount }) {
 
       <div className="tf-accounts-grid">
         {accounts.map((a) => (
-          <div className="tf-card tf-account-card" key={a.id}>
-            <div className="tf-account-top">
-              <span className="tf-icon-badge tone-neutral"><Building2 size={16} /></span>
-              <span className={`tf-badge ${a.type === "Prop Firm" ? "badge-blue" : "badge-outline"}`}>{a.type}</span>
-            </div>
-            <h3 className="tf-account-name">{a.name}</h3>
-            <div className="tf-account-balance">R$ {Number(a.balance).toLocaleString("pt-BR")}</div>
-            <div className="tf-account-status"><ShieldCheck size={13} className="text-lime" /> {a.status}</div>
-          </div>
+          <AccountCard key={a.id} account={a} onUpdate={onUpdateAccount} onDelete={onDeleteAccount} />
         ))}
         {accounts.length === 0 && <p className="tf-empty">Nenhuma conta cadastrada ainda.</p>}
       </div>
@@ -519,7 +620,7 @@ function AccountsView({ accounts, onAddAccount }) {
   );
 }
 
-function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setActive, onLogout }) {
+function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setActive, onLogout, theme, onToggleTheme }) {
   const [name, setName] = useState(userName);
   const [savedMsg, setSavedMsg] = useState(false);
   const [newPwd, setNewPwd] = useState("");
@@ -569,6 +670,14 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setAct
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Aparência</h3></div>
+            <p className="tf-muted" style={{ marginBottom: 14 }}>Escolha entre o tema escuro (padrão) ou claro.</p>
+            <button className="tf-theme-toggle" onClick={onToggleTheme}>
+              <span className={`tf-theme-option ${theme === "dark" ? "active" : ""}`}><Moon size={15} /> Escuro</span>
+              <span className={`tf-theme-option ${theme === "light" ? "active" : ""}`}><Sun size={15} /> Claro</span>
+            </button>
+          </div>
           <div className="tf-card">
             <div className="tf-card-head"><h3>Assinatura</h3></div>
             {currentPlan ? (
@@ -722,6 +831,21 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
+  const [accountFilter, setAccountFilter] = useState([]); // [] = todas as contas
+  const [theme, setTheme] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.localStorage.getItem("tradedoc-theme") || "dark";
+    }
+    return "dark";
+  });
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      window.localStorage.setItem("tradedoc-theme", next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -754,7 +878,10 @@ export default function App() {
     setSubscription(subData || null);
   }
 
-  const data = useDerivedData(trades, accounts);
+  const filteredAccountObjs = accountFilter.length === 0 ? accounts : accounts.filter((a) => accountFilter.includes(a.id));
+  const filteredAccountIds = filteredAccountObjs.map((a) => a.id);
+  const filteredTrades = accountFilter.length === 0 ? trades : trades.filter((t) => filteredAccountIds.includes(t.account_id));
+  const data = useDerivedData(filteredTrades, filteredAccountObjs);
 
   const handleOnboardingComplete = async (name, firstAccount) => {
     const userId = session.user.id;
@@ -820,6 +947,17 @@ export default function App() {
     await loadUserData();
   };
 
+  const handleUpdateAccount = async (accountId, fields) => {
+    await supabase.from("accounts").update(fields).eq("id", accountId);
+    await loadUserData();
+  };
+
+  const handleDeleteAccount = async (accountId) => {
+    // A exclusão de trades vinculados é feita automaticamente pelo banco (ON DELETE CASCADE)
+    await supabase.from("accounts").delete().eq("id", accountId);
+    await loadUserData();
+  };
+
   const handleUpdateProfile = async (name) => {
     await supabase.from("profiles").update({ name }).eq("id", session.user.id);
     await loadUserData();
@@ -841,23 +979,28 @@ export default function App() {
   };
 
   if (loadingSession) {
-    return <div className="tf-app" style={{ alignItems: "center", justifyContent: "center" }}><p className="tf-muted">Carregando...</p></div>;
+    return (
+      <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`} style={{ alignItems: "center", justifyContent: "center" }}>
+        <style>{APP_STYLES}</style>
+        <p className="tf-muted">Carregando...</p>
+      </div>
+    );
   }
 
   const view = (() => {
     switch (active) {
-      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
+      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
-      case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} />;
+      case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} />;
       case "tools": return <ToolsView />;
-      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} />;
+      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} onSubscribe={handleSubscribe} />;
-      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
+      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
     }
   })();
 
   return (
-    <div className="tf-app">
+    <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
       <style>{APP_STYLES}</style>
       {!session && <LoginScreen />}
       {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
@@ -909,6 +1052,16 @@ const APP_STYLES = `
 .tf-user-name{font-size:12.5px;font-weight:500;}
 .tf-view{flex:1;padding:26px 30px;overflow-y:auto;}
 .tf-view-header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px;}
+.tf-view-header-actions{display:flex;align-items:center;gap:10px;}
+.tf-filter-wrap{position:relative;}
+.tf-filter-btn{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;}
+.tf-filter-active{border-color:var(--blue);color:var(--blue);}
+.tf-filter-dropdown{position:absolute;top:calc(100% + 6px);right:0;min-width:220px;max-width:280px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:6px;z-index:40;box-shadow:0 12px 32px rgba(0,0,0,0.35);}
+.tf-filter-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;background:none;border:none;color:var(--text);font-size:13px;font-family:'Inter',sans-serif;text-align:left;cursor:pointer;border-radius:7px;}
+.tf-filter-item:hover{background:var(--surface-2);}
+.tf-filter-check{width:16px;height:16px;border-radius:5px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--bg);}
+.tf-filter-item.checked .tf-filter-check{background:var(--blue);border-color:var(--blue);color:#fff;}
+.tf-filter-divider{height:1px;background:var(--border);margin:4px 2px;}
 .tf-view-header h1{font-family:'Exo 2',sans-serif;font-size:22px;font-weight:600;margin:0 0 4px;}
 .tf-btn-primary{display:inline-flex;align-items:center;gap:6px;background:var(--lime);color:#10170A;border:none;padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;}
 .tf-btn-outline{padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;background:transparent;border:1px solid var(--border);color:var(--text);cursor:pointer;}
@@ -941,6 +1094,8 @@ const APP_STYLES = `
 .tf-account-name{font-size:14px;font-weight:600;margin:2px 0 0;font-family:'Exo 2',sans-serif;}
 .tf-account-balance{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:600;}
 .tf-account-status{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin-top:2px;}
+.tf-account-actions{display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.tf-account-actions .tf-row-action{width:auto;height:auto;padding:6px 10px;gap:5px;font-size:12px;font-weight:600;font-family:'Inter',sans-serif;}
 .tf-plans-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;max-width:620px;}
 .tf-plan-card{position:relative;display:flex;flex-direction:column;gap:12px;}
 .plan-highlight{border-color:var(--lime);} .tf-plan-tag{position:absolute;top:-10px;right:16px;background:var(--lime);color:#10170A;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;}
@@ -1003,6 +1158,29 @@ const APP_STYLES = `
 .tf-asset-bar-track{height:4px;border-radius:20px;background:var(--surface-2);overflow:hidden;}
 .tf-asset-bar-fill{height:100%;border-radius:20px;background:var(--lime);}
 
+/* ===================== LIGHT THEME ===================== */
+.tf-app.theme-light {
+  --bg:#F5F7FA; --surface:#FFFFFF; --surface-2:#EEF1F5; --border:#DDE2E8;
+  --text:#0D1117; --muted:#5B6472; --blue:#0070FF; --blue-dim:#E3EEFF;
+  --lime:#1B8F50; --coral:#D6304A;
+}
+.tf-app.theme-light .tf-nav-item.active,
+.tf-app.theme-light .tf-user-avatar,
+.tf-app.theme-light .tf-toggle-group button.active { color:#0052CC; }
+.tf-app.theme-light .tone-neutral,
+.tf-app.theme-light .badge-blue { color:#0052CC; }
+.tf-app.theme-light .tone-lime-1 .tf-cal-pnl { color:#1B8F50; }
+.tf-app.theme-light .tone-coral-1 .tf-cal-pnl { color:#C23B4E; }
+.tf-app.theme-light .tf-form-row input, .tf-app.theme-light .tf-form-row select,
+.tf-app.theme-light .tf-input-icon input { color-scheme: light; }
+.tf-app.theme-light .tf-modal-overlay { background: rgba(20,24,32,0.35); }
+.tf-app.theme-light .tf-sidebar-backdrop { background: rgba(20,24,32,0.35); }
+.tf-app.theme-light .tf-auth-screen { background: radial-gradient(circle at 50% 0%, rgba(0,112,255,0.08), transparent 55%); }
+
+.tf-theme-toggle{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:100%;background:var(--surface-2);}
+.tf-theme-option{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 0;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;}
+.tf-theme-option.active{background:var(--blue);color:#fff;}
+
 /* Mobile top bar (hidden on desktop) */
 .tf-mobile-topbar{display:none;}
 .tf-hamburger-btn{display:none;}
@@ -1061,6 +1239,9 @@ html, body { overflow-x: hidden; max-width: 100%; }
   .tf-view-header h1{ font-size:19px; }
   .tf-view-header{ flex-direction:column; align-items:stretch; }
   .tf-view-header .tf-btn-primary{ justify-content:center; }
+  .tf-view-header-actions{ flex-direction:column; align-items:stretch; }
+  .tf-filter-btn{ justify-content:center; }
+  .tf-filter-dropdown{ left:0; right:0; max-width:100%; }
 
   /* Table rows: shrink font so nothing overflows */
   .tf-table-row{ font-size:12px; grid-template-columns:1fr .7fr .7fr .9fr; }
