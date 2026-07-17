@@ -22,24 +22,38 @@ const BASE_CAPITAL = 12000;
 
 /* --------------------------- Derived stats --------------------------- */
 
-function useDerivedData(trades) {
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Segunda..Domingo (getDay(): 0=dom)
+const WEEKDAY_FULL_LABELS = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
+
+function parseLocalDate(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function useDerivedData(trades, accounts) {
   return useMemo(() => {
-    const sorted = [...trades].sort((a, b) => new Date(a.trade_date) - new Date(b.trade_date));
-    let running = BASE_CAPITAL;
-    let peak = BASE_CAPITAL;
+    const sorted = [...trades].sort((a, b) => parseLocalDate(a.trade_date) - parseLocalDate(b.trade_date));
+
+    const totalPnL = trades.reduce((s, t) => s + Number(t.pnl), 0);
+    const currentEquity = accounts.reduce((s, a) => s + Number(a.balance), 0);
+    // Reverse-engineer the real starting capital: saldo atual = capital inicial + soma dos trades
+    const startingCapital = currentEquity - totalPnL;
+
+    let running = startingCapital;
+    let peak = startingCapital;
     let maxDD = 0;
-    const equityCurve = sorted.map((t) => {
+    const equityCurve = [{ d: "início", eq: startingCapital }];
+    sorted.forEach((t) => {
       running += Number(t.pnl);
       peak = Math.max(peak, running);
-      const dd = ((running - peak) / peak) * 100;
+      const dd = peak > 0 ? ((running - peak) / peak) * 100 : 0;
       if (dd < maxDD) maxDD = dd;
-      return { d: t.trade_date.slice(8, 10), eq: running };
+      equityCurve.push({ d: `${t.trade_date.slice(8, 10)}/${t.trade_date.slice(5, 7)}`, eq: running });
     });
 
     const wins = trades.filter((t) => t.pnl > 0);
     const losses = trades.filter((t) => t.pnl < 0);
     const winRate = trades.length ? Math.round((wins.length / trades.length) * 100) : 0;
-    const totalPnL = trades.reduce((s, t) => s + Number(t.pnl), 0);
     const grossWin = wins.reduce((s, t) => s + Number(t.pnl), 0);
     const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl), 0));
     const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "—";
@@ -55,12 +69,25 @@ function useDerivedData(trades) {
       .map((a) => ({ ...a, winRate: Math.round((a.wins / a.trades) * 100) }))
       .sort((a, b) => b.pnl - a.pnl);
 
+    const weekdayMap = {};
+    for (let i = 0; i < 7; i++) weekdayMap[i] = 0;
+    trades.forEach((t) => {
+      const day = parseLocalDate(t.trade_date).getDay();
+      weekdayMap[day] += Number(t.pnl);
+    });
+    const weekdayMaxAbs = Math.max(1, ...Object.values(weekdayMap).map((v) => Math.abs(v)));
+    const weekdayPerf = WEEKDAY_ORDER.map((dayIdx) => ({
+      label: WEEKDAY_FULL_LABELS[dayIdx],
+      pnl: weekdayMap[dayIdx],
+      pct: Math.round((Math.abs(weekdayMap[dayIdx]) / weekdayMaxAbs) * 100),
+    }));
+
     const recentTrades = [...trades]
-      .sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date))
+      .sort((a, b) => parseLocalDate(b.trade_date) - parseLocalDate(a.trade_date))
       .slice(0, 6);
 
-    return { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, recentTrades, currentEquity: running };
-  }, [trades]);
+    return { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity };
+  }, [trades, accounts]);
 }
 
 /* ------------------------------- UI bits -------------------------------- */
@@ -199,7 +226,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate }) {
 /* -------------------------------- Views --------------------------------- */
 
 function DashboardView({ data, onOpenModal }) {
-  const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, recentTrades, currentEquity } = data;
+  const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
   return (
     <div className="tf-view">
       <div className="tf-view-header">
@@ -229,25 +256,49 @@ function DashboardView({ data, onOpenModal }) {
             </defs>
             <CartesianGrid stroke="#1C2537" vertical={false} />
             <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
-            <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${v.toLocaleString("pt-BR")}`, "Capital"]} />
+            <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} domain={["auto", "auto"]} />
+            <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Capital"]} />
             <Area type="monotone" dataKey="eq" stroke="#1FA35C" strokeWidth={2.5} fill="url(#eqFill)" />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
+      <div className="tf-card" style={{ marginBottom: 16 }}>
+        <div className="tf-card-head"><h3>Performance por dia da semana</h3></div>
+        {weekdayPerf.every((w) => w.pnl === 0) ? (
+          <p className="tf-empty">Nenhum trade registrado ainda.</p>
+        ) : (
+          <div className="tf-weekday-list">
+            {weekdayPerf.map((w) => (
+              <div className="tf-weekday-row" key={w.label}>
+                <span className="tf-weekday-label">{w.label}</span>
+                <div className="tf-weekday-bar-track">
+                  <div className={`tf-weekday-bar-fill ${w.pnl >= 0 ? "fill-lime" : "fill-coral"}`} style={{ width: `${w.pnl === 0 ? 2 : w.pct}%` }} />
+                </div>
+                <span className={`tf-mono tf-weekday-value ${w.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(w.pnl)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="tf-two-col">
         <div className="tf-card">
-          <div className="tf-card-head"><h3>Performance por ativo</h3></div>
+          <div className="tf-card-head"><h3>Análise por ativo</h3></div>
           <div className="tf-table">
             <div className="tf-table-row tf-table-head"><span>Ativo</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
             {assetPerf.length === 0 && <div className="tf-empty">Nenhum trade registrado ainda.</div>}
             {assetPerf.map((a) => (
-              <div className="tf-table-row" key={a.asset}>
-                <span className="tf-mono tf-asset">{a.asset}</span>
-                <span className="tf-mono tf-muted">{a.trades}</span>
-                <span className="tf-mono">{a.winRate}%</span>
-                <span className={`tf-mono ${a.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(a.pnl)}</span>
+              <div className="tf-asset-block" key={a.asset}>
+                <div className="tf-table-row">
+                  <span className="tf-mono tf-asset">{a.asset}</span>
+                  <span className="tf-mono tf-muted">{a.trades}</span>
+                  <span className="tf-mono">{a.winRate}%</span>
+                  <span className={`tf-mono ${a.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(a.pnl)}</span>
+                </div>
+                <div className="tf-asset-bar-track">
+                  <div className="tf-asset-bar-fill" style={{ width: `${a.winRate}%` }} />
+                </div>
               </div>
             ))}
           </div>
@@ -695,7 +746,7 @@ export default function App() {
     setSubscription(subData || null);
   }
 
-  const data = useDerivedData(trades);
+  const data = useDerivedData(trades, accounts);
 
   const handleOnboardingComplete = async (name, firstAccount) => {
     const userId = session.user.id;
@@ -877,6 +928,20 @@ const APP_STYLES = `
 .tone-empty{background:transparent;}
 .tf-daymodal-total{display:flex;align-items:center;justify-content:space-between;padding:10px 0;margin-bottom:8px;border-bottom:1px solid var(--border);font-size:13.5px;}
 
+.tf-weekday-list{display:flex;flex-direction:column;gap:12px;}
+.tf-weekday-row{display:grid;grid-template-columns:70px 1fr auto;align-items:center;gap:12px;}
+.tf-weekday-label{font-size:13px;color:var(--text);}
+.tf-weekday-bar-track{height:8px;border-radius:20px;background:var(--surface-2);overflow:hidden;}
+.tf-weekday-bar-fill{height:100%;border-radius:20px;transition:width .3s;}
+.fill-lime{background:var(--lime);} .fill-coral{background:var(--coral);}
+.tf-weekday-value{font-size:13px;font-weight:600;min-width:90px;text-align:right;}
+
+.tf-asset-block{padding:8px 0;border-bottom:1px solid var(--border);}
+.tf-asset-block:last-child{border-bottom:none;}
+.tf-asset-block .tf-table-row{border-bottom:none;padding:0 0 6px;}
+.tf-asset-bar-track{height:4px;border-radius:20px;background:var(--surface-2);overflow:hidden;}
+.tf-asset-bar-fill{height:100%;border-radius:20px;background:var(--lime);}
+
 /* Mobile top bar (hidden on desktop) */
 .tf-mobile-topbar{display:none;}
 .tf-hamburger-btn{display:none;}
@@ -956,6 +1021,10 @@ html, body { overflow-x: hidden; max-width: 100%; }
   .tf-auth-card{ max-width:100%; padding:24px 20px; }
 
   .tf-hero-value{ font-size:13px; }
+
+  .tf-weekday-row{ grid-template-columns:56px 1fr auto; gap:8px; }
+  .tf-weekday-label{ font-size:11.5px; }
+  .tf-weekday-value{ font-size:11.5px; min-width:76px; }
 
   /* iOS auto-zooms inputs with font-size below 16px on focus — force 16px to prevent it */
   .tf-form-row input, .tf-form-row select, .tf-input-icon input {
