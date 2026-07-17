@@ -752,6 +752,9 @@ export default function App() {
       {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
       {session && profile && (
         <>
+          <div className="tf-mobile-topbar">
+            <span className="tf-brand-name">TRADE<span className="text-blue">DOC</span></span>
+          </div>
           <Sidebar active={active} setActive={setActive} userName={profile.name} />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
@@ -855,4 +858,75 @@ const APP_STYLES = `
 .tone-coral-3{background:rgba(255,92,114,0.32);} .tone-coral-3 .tf-cal-pnl{color:var(--coral);}
 .tone-empty{background:transparent;}
 .tf-daymodal-total{display:flex;align-items:center;justify-content:space-between;padding:10px 0;margin-bottom:8px;border-bottom:1px solid var(--border);font-size:13.5px;}
+
+/* Mobile top bar (hidden on desktop) */
+.tf-mobile-topbar{display:none;}
+
+/* ===================== RESPONSIVE ===================== */
+html, body { overflow-x: hidden; max-width: 100%; }
+
+@media (max-width: 860px) {
+  .tf-app { flex-direction: column; min-height: 100vh; }
+
+  .tf-mobile-topbar{
+    display:flex; align-items:center; justify-content:center;
+    padding:14px 16px; background:var(--surface); border-bottom:1px solid var(--border);
+    position:sticky; top:0; z-index:15;
+  }
+
+  /* Sidebar becomes a fixed bottom tab bar */
+  .tf-sidebar{
+    position:fixed; bottom:0; left:0; right:0; width:100%; height:auto;
+    flex-direction:row; padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+    border-right:none; border-top:1px solid var(--border); z-index:20;
+  }
+  .tf-brand, .tf-sidebar-footer { display:none; }
+  .tf-nav{ flex-direction:row; justify-content:space-around; gap:2px; flex:1; }
+  .tf-nav-item{ flex-direction:column; gap:3px; padding:6px 2px; font-size:10px; text-align:center; flex:1; }
+  .tf-nav-item span{ font-size:10px; line-height:1.1; }
+
+  /* Push content above the fixed bottom bar */
+  .tf-view{ padding:18px 16px calc(78px + env(safe-area-inset-bottom)); }
+
+  /* Grids collapse to fewer columns */
+  .tf-stats-grid{ grid-template-columns:repeat(2,1fr); gap:10px; }
+  .tf-stat-value{ font-size:19px; }
+  .tf-two-col{ grid-template-columns:1fr; }
+  .tf-accounts-grid{ grid-template-columns:1fr; }
+  .tf-plans-grid{ grid-template-columns:1fr; max-width:100%; }
+  .tf-tools-grid{ grid-template-columns:1fr; }
+  .tf-form-row-inline{ grid-template-columns:1fr; }
+  .tf-form-inline-3{ grid-template-columns:1fr; }
+
+  .tf-view-header h1{ font-size:19px; }
+  .tf-view-header{ flex-direction:column; align-items:stretch; }
+  .tf-view-header .tf-btn-primary{ justify-content:center; }
+
+  /* Table rows: shrink font so nothing overflows */
+  .tf-table-row{ font-size:12px; grid-template-columns:1fr .7fr .7fr .9fr; }
+  .tf-trade-row{ font-size:12px; flex-wrap:wrap; }
+
+  /* Modal fits small screens */
+  .tf-modal{ max-width:calc(100vw - 24px); margin:12px; padding:18px; max-height:calc(100vh - 100px); overflow-y:auto; }
+  .tf-modal-overlay{ align-items:flex-end; }
+  .tf-modal{ border-radius:16px 16px 0 0; }
+
+  /* Calendar stays 7 columns but tighter */
+  .tf-cal-grid{ gap:4px; }
+  .tf-cal-cell{ padding:4px 5px; border-radius:6px; }
+  .tf-cal-day{ font-size:9.5px; }
+  .tf-cal-pnl{ font-size:8.5px; }
+  .tf-cal-weekdays{ font-size:9.5px; }
+
+  .tf-auth-screen{ padding:16px; }
+  .tf-auth-card{ max-width:100%; padding:24px 20px; }
+
+  .tf-hero-value{ font-size:13px; }
+}
+
+@media (max-width: 380px) {
+  .tf-stats-grid{ grid-template-columns:1fr; }
+  .tf-table-row{ grid-template-columns:1fr .6fr .8fr; }
+  .tf-table-row span:nth-child(3){ display:none; }
+}
 `;
