@@ -866,27 +866,28 @@ const APP_STYLES = `
 html, body { overflow-x: hidden; max-width: 100%; }
 
 @media (max-width: 860px) {
-  .tf-app { flex-direction: column; min-height: 100vh; }
+  .tf-app { flex-direction: row; min-height: 100vh; }
 
   .tf-mobile-topbar{
     display:flex; align-items:center; justify-content:center;
     padding:14px 16px; background:var(--surface); border-bottom:1px solid var(--border);
-    position:sticky; top:0; z-index:15;
+    position:fixed; top:0; left:64px; right:0; z-index:15;
   }
 
-  /* Sidebar becomes a fixed bottom tab bar */
+  /* Sidebar becomes a fixed narrow icon rail on the left */
   .tf-sidebar{
-    position:fixed; bottom:0; left:0; right:0; width:100%; height:auto;
-    flex-direction:row; padding:6px 4px calc(6px + env(safe-area-inset-bottom));
-    border-right:none; border-top:1px solid var(--border); z-index:20;
+    position:fixed; top:0; left:0; bottom:0; width:64px; height:100vh;
+    flex-direction:column; padding:14px 6px calc(14px + env(safe-area-inset-bottom));
+    border-right:1px solid var(--border); border-top:none; z-index:20;
+    align-items:center;
   }
   .tf-brand, .tf-sidebar-footer { display:none; }
-  .tf-nav{ flex-direction:row; justify-content:space-around; gap:2px; flex:1; }
-  .tf-nav-item{ flex-direction:column; gap:3px; padding:6px 2px; font-size:10px; text-align:center; flex:1; }
-  .tf-nav-item span{ font-size:10px; line-height:1.1; }
+  .tf-nav{ flex-direction:column; justify-content:flex-start; gap:8px; width:100%; }
+  .tf-nav-item{ flex-direction:column; gap:3px; padding:9px 2px; font-size:9.5px; text-align:center; border-radius:10px; }
+  .tf-nav-item span{ font-size:9px; line-height:1.1; }
 
-  /* Push content above the fixed bottom bar */
-  .tf-view{ padding:18px 16px calc(78px + env(safe-area-inset-bottom)); }
+  /* Push content to the right of the rail, below the top bar */
+  .tf-view{ margin-left:64px; padding:70px 16px 24px; }
 
   /* Grids collapse to fewer columns */
   .tf-stats-grid{ grid-template-columns:repeat(2,1fr); gap:10px; }
