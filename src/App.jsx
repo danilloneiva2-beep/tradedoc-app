@@ -577,12 +577,13 @@ function AccountCard({ account, onUpdate, onDelete }) {
   );
 }
 
-function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount }) {
+function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount, accountLimit, isProPlan }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [balance, setBalance] = useState("");
   const [type, setType] = useState("Real");
   const [saving, setSaving] = useState(false);
+  const atLimit = accounts.length >= accountLimit;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -597,9 +598,22 @@ function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Contas</h1><p className="tf-muted">Gerencie suas contas de trading</p></div>
-        <button className="tf-btn-primary" onClick={() => setAdding(true)}><Plus size={15} /> Adicionar conta</button>
+        <div>
+          <h1>Contas</h1>
+          <p className="tf-muted">Gerencie suas contas de trading · {accounts.length}/{accountLimit} usadas ({isProPlan ? "Pro" : "Starter"})</p>
+        </div>
+        <button className="tf-btn-primary" onClick={() => setAdding(true)} disabled={atLimit} title={atLimit ? "Limite de contas do seu plano atingido" : ""}>
+          <Plus size={15} /> Adicionar conta
+        </button>
       </div>
+
+      {atLimit && !isProPlan && (
+        <div className="tf-card" style={{ marginBottom: 16, borderColor: "var(--lime)" }}>
+          <p style={{ margin: 0, fontSize: 13.5 }}>
+            Você atingiu o limite de 1 conta do plano Starter. <a href="https://tradefyapp.com.br/#planos" style={{ color: "var(--lime)", fontWeight: 700 }}>Faça upgrade para o Pro</a> e tenha até 5 contas.
+          </p>
+        </div>
+      )}
 
       {adding && (
         <div className="tf-card" style={{ marginBottom: 16 }}>
@@ -771,6 +785,7 @@ function LoginScreen({ onAuth }) {
       <div className="tf-auth-card">
         <div className="tf-brand tf-brand-center"><div className="tf-brand-name tf-brand-name-lg">TRADE<span className="text-lime">FY</span></div></div>
         <p className="tf-auth-tagline-brand">PERFORMANCE <span className="text-lime">QUE EVOLUI.</span></p>
+        <p className="tf-muted" style={{ fontSize: 11.5, margin: "-8px 0 14px" }}>Acesso liberado após confirmação do plano.</p>
 
         <form className="tf-form" onSubmit={submit}>
           <div className="tf-form-row">
@@ -818,6 +833,35 @@ function OnboardingScreen({ onComplete }) {
           <div className="tf-form-row"><label>Saldo inicial (R$)</label><input value={balance} onChange={(e) => setBalance(e.target.value)} inputMode="decimal" required /></div>
           <button type="submit" className="tf-btn-primary tf-form-submit" disabled={saving}>{saving ? "Salvando..." : "Concluir"} <ArrowRight size={15} /></button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function AccessPendingScreen({ onLogout, onRefresh }) {
+  const [checking, setChecking] = useState(false);
+
+  const handleRefresh = async () => {
+    setChecking(true);
+    await onRefresh();
+    setChecking(false);
+  };
+
+  return (
+    <div className="tf-auth-screen">
+      <div className="tf-auth-card">
+        <div className="tf-pending-icon"><Lock size={22} /></div>
+        <h2 className="tf-onboarding-title">Acesso ainda não liberado</h2>
+        <p className="tf-muted" style={{ marginBottom: 20 }}>
+          Sua conta foi criada, mas o acesso ao Tradefy só é liberado depois da confirmação de um plano ativo.
+        </p>
+        <a href="https://tradefyapp.com.br/#planos" className="tf-btn-primary tf-form-submit" style={{ marginBottom: 10, textDecoration: "none" }}>
+          Ver planos <ArrowRight size={15} />
+        </a>
+        <button className="tf-btn-outline" style={{ width: "100%", marginBottom: 10 }} onClick={handleRefresh} disabled={checking}>
+          {checking ? "Verificando..." : "Já paguei, verificar novamente"}
+        </button>
+        <button className="tf-skip-link" onClick={onLogout}>Sair da conta</button>
       </div>
     </div>
   );
@@ -895,6 +939,14 @@ export default function App() {
     const { data: tradesData } = await supabase.from("trades").select("*").eq("user_id", userId).order("trade_date", { ascending: false });
     setTrades(tradesData || []);
 
+    // Confere se esse e-mail tem uma compra na Cakto ou uma liberação manual
+    // esperando por ele, e ativa a assinatura automaticamente se for o caso.
+    try {
+      await supabase.functions.invoke("sync-access");
+    } catch (err) {
+      console.error("sync-access falhou:", err);
+    }
+
     const { data: subData } = await supabase.from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
     setSubscription(subData || null);
   }
@@ -963,6 +1015,14 @@ export default function App() {
   };
 
   const handleAddAccount = async (acc) => {
+    if (accounts.length >= accountLimit) {
+      alert(
+        isProPlan
+          ? "Você atingiu o limite de 5 contas do plano Pro."
+          : "O plano Starter permite apenas 1 conta. Faça upgrade para o Pro para adicionar até 5 contas."
+      );
+      return;
+    }
     const userId = session.user.id;
     await supabase.from("accounts").insert({ ...acc, user_id: userId });
     await loadUserData();
@@ -1012,7 +1072,7 @@ export default function App() {
     switch (active) {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
-      case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} />;
+      case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} onSubscribe={handleSubscribe} />;
@@ -1020,12 +1080,19 @@ export default function App() {
     }
   })();
 
+  const hasActiveAccess = subscription?.status === "active";
+  const isProPlan = (subscription?.plan || "").toLowerCase().includes("pro");
+  const accountLimit = isProPlan ? 5 : 1;
+
   return (
     <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
       <style>{APP_STYLES}</style>
       {!session && <LoginScreen />}
       {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
-      {session && profile && (
+      {session && profile && !hasActiveAccess && (
+        <AccessPendingScreen onLogout={handleLogout} onRefresh={loadUserData} />
+      )}
+      {session && profile && hasActiveAccess && (
         <>
           <div className="tf-mobile-topbar">
             <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)}><Menu size={20} /></button>
@@ -1132,6 +1199,7 @@ const APP_STYLES = `
 .tf-auth-card{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 26px;text-align:center;}
 .tf-auth-tagline-brand{font-family:'Exo 2',sans-serif;font-weight:700;font-size:11px;letter-spacing:.06em;margin:2px 0 14px;}
 .tf-onboarding-title{font-family:'Exo 2',sans-serif;font-size:17px;margin:0 0 14px;}
+.tf-pending-icon{width:44px;height:44px;border-radius:12px;background:rgba(255,92,114,0.12);color:var(--coral);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
 .tf-form{display:flex;flex-direction:column;gap:12px;text-align:left;}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-form-row input,.tf-form-row select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13.5px;outline:none;width:100%;color-scheme:dark;}
