@@ -1110,6 +1110,10 @@ export default function App() {
     );
   }
 
+  const hasActiveAccess = subscription?.status === "active";
+  const isProPlan = (subscription?.plan || "").toLowerCase().includes("pro");
+  const accountLimit = isProPlan ? 5 : 1;
+
   const view = (() => {
     switch (active) {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
@@ -1121,10 +1125,6 @@ export default function App() {
       default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
     }
   })();
-
-  const hasActiveAccess = subscription?.status === "active";
-  const isProPlan = (subscription?.plan || "").toLowerCase().includes("pro");
-  const accountLimit = isProPlan ? 5 : 1;
 
   return (
     <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
