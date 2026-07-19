@@ -874,6 +874,38 @@ function OnboardingScreen({ onComplete }) {
   );
 }
 
+function LoadingScreen() {
+  const candles = [
+    { h: 32, up: true },
+    { h: 54, up: true },
+    { h: 40, up: false },
+    { h: 74, up: true },
+    { h: 48, up: false },
+    { h: 86, up: true },
+    { h: 64, up: true },
+  ];
+  return (
+    <div className="tf-loading-screen">
+      <div className="tf-loading-mark">
+        <img src={LOGO_MARK} alt="Tradefy" />
+      </div>
+      <div className="tf-candles">
+        {candles.map((c, i) => (
+          <div
+            className="tf-candle"
+            key={i}
+            style={{ "--h": `${c.h}px`, "--wh": `${c.h + 14}px`, animationDelay: `${i * 0.14}s` }}
+          >
+            <span className={`tf-candle-wick ${c.up ? "up" : "down"}`} />
+            <span className={`tf-candle-body ${c.up ? "up" : "down"}`} />
+          </div>
+        ))}
+      </div>
+      <p className="tf-muted" style={{ marginTop: 20, fontSize: 12.5 }}>Carregando sua performance...</p>
+    </div>
+  );
+}
+
 function AccessPendingScreen({ onLogout, onRefresh }) {
   const [checking, setChecking] = useState(false);
   const [autoTries, setAutoTries] = useState(0);
@@ -924,6 +956,7 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
 export default function App() {
   const [session, setSession] = useState(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [loadingUserData, setLoadingUserData] = useState(true);
   const [profile, setProfile] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [trades, setTrades] = useState([]);
@@ -976,8 +1009,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!session) { setProfile(null); setAccounts([]); setTrades([]); return; }
-    loadUserData();
+    if (!session) { setProfile(null); setAccounts([]); setTrades([]); setLoadingUserData(false); return; }
+    setLoadingUserData(true);
+    loadUserData().finally(() => setLoadingUserData(false));
   }, [session]);
 
   async function loadUserData() {
@@ -1101,11 +1135,11 @@ export default function App() {
     setActive("dashboard");
   };
 
-  if (loadingSession) {
+  if (loadingSession || (session && loadingUserData)) {
     return (
       <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`} style={{ alignItems: "center", justifyContent: "center" }}>
         <style>{APP_STYLES}</style>
-        <p className="tf-muted">Carregando...</p>
+        <LoadingScreen />
       </div>
     );
   }
@@ -1253,6 +1287,27 @@ const APP_STYLES = `
 .tf-auth-tagline-brand{font-family:'Exo 2',sans-serif;font-weight:700;font-size:11px;letter-spacing:.06em;margin:2px 0 14px;}
 .tf-onboarding-title{font-family:'Exo 2',sans-serif;font-size:17px;margin:0 0 14px;}
 .tf-pending-icon{width:44px;height:44px;border-radius:12px;background:rgba(255,92,114,0.12);color:var(--coral);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+
+.tf-loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;padding:24px;}
+.tf-loading-mark img{height:38px;width:auto;margin-bottom:30px;opacity:.95;}
+.tf-candles{display:flex;align-items:flex-end;justify-content:center;gap:7px;height:100px;}
+.tf-candle{position:relative;width:9px;height:100%;display:flex;align-items:flex-end;justify-content:center;}
+.tf-candle-wick{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:2px;border-radius:2px;height:0;animation:tfCandleWick 2.2s ease-in-out infinite;}
+.tf-candle-body{position:relative;width:100%;border-radius:2px;height:0;animation:tfCandleBody 2.2s ease-in-out infinite;}
+.tf-candle-wick.up, .tf-candle-body.up{background:var(--lime);}
+.tf-candle-wick.down, .tf-candle-body.down{background:var(--coral);}
+@keyframes tfCandleBody{
+  0%{height:0; opacity:.35;}
+  35%{height:var(--h); opacity:1;}
+  75%{height:var(--h); opacity:1;}
+  100%{height:0; opacity:.35;}
+}
+@keyframes tfCandleWick{
+  0%{height:0; opacity:.35;}
+  35%{height:var(--wh); opacity:.6;}
+  75%{height:var(--wh); opacity:.6;}
+  100%{height:0; opacity:.35;}
+}
 .tf-form{display:flex;flex-direction:column;gap:12px;text-align:left;}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-form-row input,.tf-form-row select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13.5px;outline:none;width:100%;color-scheme:dark;}
