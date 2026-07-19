@@ -607,14 +607,6 @@ function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount
         </button>
       </div>
 
-      {atLimit && !isProPlan && (
-        <div className="tf-card" style={{ marginBottom: 16, borderColor: "var(--lime)" }}>
-          <p style={{ margin: 0, fontSize: 13.5 }}>
-            Você atingiu o limite de 1 conta do plano Starter. <a href="https://tradefyapp.com.br/#planos" style={{ color: "var(--lime)", fontWeight: 700 }}>Faça upgrade para o Pro</a> e tenha até 5 contas.
-          </p>
-        </div>
-      )}
-
       {adding && (
         <div className="tf-card" style={{ marginBottom: 16 }}>
           <form onSubmit={submit} className="tf-form tf-form-inline-3">
@@ -629,11 +621,42 @@ function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount
         </div>
       )}
 
-      <div className="tf-accounts-grid">
-        {accounts.map((a) => (
-          <AccountCard key={a.id} account={a} onUpdate={onUpdateAccount} onDelete={onDeleteAccount} />
-        ))}
-        {accounts.length === 0 && <p className="tf-empty">Nenhuma conta cadastrada ainda.</p>}
+      <div className="tf-accounts-layout">
+        <div className="tf-accounts-grid">
+          {accounts.map((a) => (
+            <AccountCard key={a.id} account={a} onUpdate={onUpdateAccount} onDelete={onDeleteAccount} />
+          ))}
+          {accounts.length === 0 && <p className="tf-empty">Nenhuma conta cadastrada ainda.</p>}
+
+          {!isProPlan && Array.from({ length: 5 - accountLimit }).map((_, i) => (
+            <div className="tf-account-slot-locked" key={`locked-${i}`}>
+              <Lock size={18} />
+              <span>Conta bloqueada</span>
+              <span className="tf-muted" style={{ fontSize: 11.5 }}>Disponível no Pro</span>
+            </div>
+          ))}
+        </div>
+
+        {!isProPlan && (
+          <div className="tf-upgrade-card">
+            <div className="tf-pending-icon" style={{ margin: "0 0 12px" }}><Lock size={20} /></div>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16 }}>Plano Starter</h3>
+            <p className="tf-muted" style={{ fontSize: 13, marginBottom: 16 }}>
+              Você pode conectar 1 conta. Faça upgrade para o Pro e libere até 5 contas simultâneas.
+            </p>
+            <ul className="tf-plan-features" style={{ marginBottom: 16 }}>
+              <li><Check size={14} className="text-lime" /> Até 5 contas</li>
+              <li><Check size={14} className="text-lime" /> Analytics avançado</li>
+              <li><Check size={14} className="text-lime" /> Suporte prioritário</li>
+            </ul>
+            <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", textAlign: "center", display: "block" }}>
+              Fazer upgrade — R$ 59,90/mês
+            </a>
+            <p className="tf-muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0 }}>
+              Acesso liberado automaticamente após a confirmação do pagamento.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -717,33 +740,46 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setAct
   );
 }
 
-function PlansView({ currentPlan, onSubscribe }) {
-  const plans = [
-    { name: "Starter", price: "R$ 29,90", period: "/mês", features: ["1 conta conectada", "Diário de trades ilimitado", "Relatórios básicos"] },
-    { name: "Pro", price: "R$ 59,90", period: "/mês", highlight: true, features: ["Contas ilimitadas", "Analytics avançado", "Suporte prioritário"] },
-  ];
+function PlansView({ currentPlan }) {
+  const isPro = (currentPlan || "").toLowerCase().includes("pro");
+
+  if (isPro) {
+    return (
+      <div className="tf-view">
+        <div className="tf-view-header"><div><h1>Planos</h1><p className="tf-muted">Sua assinatura</p></div></div>
+        <div className="tf-card tf-plan-card plan-highlight" style={{ maxWidth: 360 }}>
+          <span className="tf-plan-tag tf-plan-tag-active">Plano atual</span>
+          <h3>Pro</h3>
+          <div className="tf-plan-price">R$ 59,90<span className="tf-muted">/mês</span></div>
+          <ul className="tf-plan-features">
+            <li><Check size={14} className="text-lime" /> Até 5 contas</li>
+            <li><Check size={14} className="text-lime" /> Analytics avançado</li>
+            <li><Check size={14} className="text-lime" /> Suporte prioritário</li>
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tf-view">
-      <div className="tf-view-header"><div><h1>Planos</h1><p className="tf-muted">Escolha o plano ideal</p></div></div>
-      <div className="tf-plans-grid">
-        {plans.map((p) => {
-          const isActive = currentPlan === p.name;
-          return (
-            <div className={`tf-card tf-plan-card ${p.highlight ? "plan-highlight" : ""}`} key={p.name}>
-              {isActive && <span className="tf-plan-tag tf-plan-tag-active">Plano atual</span>}
-              <h3>{p.name}</h3>
-              <div className="tf-plan-price">{p.price}<span className="tf-muted">{p.period}</span></div>
-              <ul className="tf-plan-features">{p.features.map((f) => <li key={f}><Check size={14} className="text-lime" /> {f}</li>)}</ul>
-              <button className={isActive ? "tf-btn-outline" : "tf-btn-primary"} onClick={() => !isActive && onSubscribe(p.name)} disabled={isActive}>
-                {isActive ? "Assinado" : `Assinar ${p.name}`}
-              </button>
-            </div>
-          );
-        })}
+      <div className="tf-view-header"><div><h1>Planos</h1><p className="tf-muted">Faça upgrade e desbloqueie todo o Tradefy</p></div></div>
+      <div className="tf-card tf-plan-card plan-highlight" style={{ maxWidth: 360 }}>
+        <span className="tf-plan-tag">Upgrade</span>
+        <h3>Pro</h3>
+        <div className="tf-plan-price">R$ 59,90<span className="tf-muted">/mês</span></div>
+        <ul className="tf-plan-features">
+          <li><Check size={14} className="text-lime" /> Até 5 contas conectadas</li>
+          <li><Check size={14} className="text-lime" /> Analytics avançado por ativo</li>
+          <li><Check size={14} className="text-lime" /> Suporte prioritário</li>
+        </ul>
+        <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", textAlign: "center", display: "block" }}>
+          Fazer upgrade para o Pro
+        </a>
+        <p className="tf-muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>
+          Seu acesso é liberado automaticamente assim que o pagamento for confirmado.
+        </p>
       </div>
-      <p className="tf-muted" style={{ marginTop: 16, maxWidth: 480 }}>
-        Nota: este botão ainda não processa pagamento real — ele só marca a assinatura como ativa no banco de dados, pra você testar o fluxo. A integração com gateway de pagamento (Mercado Pago/Stripe) é o próximo passo.
-      </p>
     </div>
   );
 }
@@ -775,7 +811,7 @@ function LoginScreen({ onAuth }) {
     } else {
       const { error } = await supabase.auth.signUp({ email, password });
       if (error) setError(error.message);
-      else setInfo("Conta criada! Se a confirmação de e-mail estiver ativa no seu projeto Supabase, verifique sua caixa de entrada antes de entrar.");
+      else setInfo("Conta criada! Redirecionando...");
     }
     setLoading(false);
   };
@@ -840,12 +876,23 @@ function OnboardingScreen({ onComplete }) {
 
 function AccessPendingScreen({ onLogout, onRefresh }) {
   const [checking, setChecking] = useState(false);
+  const [autoTries, setAutoTries] = useState(0);
+  const MAX_AUTO_TRIES = 8; // ~ 1 tentativa a cada 8s por pouco mais de 1 minuto
 
   const handleRefresh = async () => {
     setChecking(true);
     await onRefresh();
     setChecking(false);
   };
+
+  useEffect(() => {
+    if (autoTries >= MAX_AUTO_TRIES) return;
+    const timer = setTimeout(async () => {
+      await onRefresh();
+      setAutoTries((n) => n + 1);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [autoTries]);
 
   return (
     <div className="tf-auth-screen">
@@ -861,6 +908,11 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
         <button className="tf-btn-outline" style={{ width: "100%", marginBottom: 10 }} onClick={handleRefresh} disabled={checking}>
           {checking ? "Verificando..." : "Já paguei, verificar novamente"}
         </button>
+        {autoTries < MAX_AUTO_TRIES && (
+          <p className="tf-muted" style={{ fontSize: 11, marginBottom: 10 }}>
+            Verificando automaticamente a cada poucos segundos...
+          </p>
+        )}
         <button className="tf-skip-link" onClick={onLogout}>Sair da conta</button>
       </div>
     </div>
@@ -1044,16 +1096,6 @@ export default function App() {
     await loadUserData();
   };
 
-  const handleSubscribe = async (planName) => {
-    const userId = session.user.id;
-    if (subscription) {
-      await supabase.from("subscriptions").update({ plan: planName, status: "active" }).eq("id", subscription.id);
-    } else {
-      await supabase.from("subscriptions").insert({ user_id: userId, plan: planName, status: "active" });
-    }
-    await loadUserData();
-  };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setActive("dashboard");
@@ -1075,7 +1117,7 @@ export default function App() {
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
-      case "plans": return <PlansView currentPlan={subscription?.plan} onSubscribe={handleSubscribe} />;
+      case "plans": return <PlansView currentPlan={subscription?.plan} />;
       default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
     }
   })();
@@ -1179,6 +1221,17 @@ const APP_STYLES = `
 .tf-row-action:hover{color:var(--text);border-color:var(--blue);}
 .tf-row-action-danger:hover{color:var(--coral);border-color:var(--coral);}
 .tf-accounts-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.tf-accounts-layout{display:grid;grid-template-columns:1fr 300px;gap:20px;align-items:start;}
+.tf-accounts-layout .tf-accounts-grid{grid-template-columns:repeat(2,1fr);}
+.tf-account-slot-locked{
+  border:1px dashed var(--border); border-radius:14px; padding:20px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  color:var(--muted); min-height:120px; text-align:center;
+}
+.tf-upgrade-card{
+  background:var(--surface); border:1px solid var(--lime); border-radius:16px; padding:22px;
+  align-self:start; position:sticky; top:20px;
+}
 .tf-account-card{display:flex;flex-direction:column;gap:8px;} .tf-account-top{display:flex;align-items:center;justify-content:space-between;}
 .tf-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:20px;text-transform:uppercase;}
 .badge-blue{background:rgba(0,112,255,0.18);color:#7FA6FF;} .badge-outline{border:1px solid var(--border);color:var(--muted);}
@@ -1323,6 +1376,8 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-stat-value{ font-size:19px; }
   .tf-two-col{ grid-template-columns:1fr; }
   .tf-accounts-grid{ grid-template-columns:1fr; }
+  .tf-accounts-layout{ grid-template-columns:1fr; }
+  .tf-upgrade-card{ position:static; }
   .tf-plans-grid{ grid-template-columns:1fr; max-width:100%; }
   .tf-tools-grid{ grid-template-columns:1fr; }
   .tf-form-row-inline{ grid-template-columns:1fr; }
