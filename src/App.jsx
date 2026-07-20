@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import * as THREE from "three";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -7,7 +8,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown,
+  Hash, Scale, TrendingDown, Globe, Loader2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -1197,9 +1198,354 @@ function TaxCalculatorTool() {
   );
 }
 
+/* --------------------------- Mapa Macro (globo 3D) --------------------------- */
+
+const MACRO_COUNTRIES = [
+  { name: "Estados Unidos", iso2: "US", lat: 38, lon: -97 },
+  { name: "China", iso2: "CN", lat: 35, lon: 105 },
+  { name: "Japão", iso2: "JP", lat: 36, lon: 138 },
+  { name: "Alemanha", iso2: "DE", lat: 51, lon: 10 },
+  { name: "Índia", iso2: "IN", lat: 21, lon: 78 },
+  { name: "Reino Unido", iso2: "GB", lat: 54, lon: -2 },
+  { name: "França", iso2: "FR", lat: 46, lon: 2 },
+  { name: "Itália", iso2: "IT", lat: 43, lon: 12 },
+  { name: "Brasil", iso2: "BR", lat: -14, lon: -51 },
+  { name: "Canadá", iso2: "CA", lat: 56, lon: -106 },
+  { name: "Rússia", iso2: "RU", lat: 61, lon: 105 },
+  { name: "Coreia do Sul", iso2: "KR", lat: 36, lon: 128 },
+  { name: "Austrália", iso2: "AU", lat: -25, lon: 133 },
+  { name: "Espanha", iso2: "ES", lat: 40, lon: -4 },
+  { name: "México", iso2: "MX", lat: 23, lon: -102 },
+  { name: "Indonésia", iso2: "ID", lat: -5, lon: 120 },
+  { name: "Holanda", iso2: "NL", lat: 52, lon: 5 },
+  { name: "Arábia Saudita", iso2: "SA", lat: 24, lon: 45 },
+  { name: "Turquia", iso2: "TR", lat: 39, lon: 35 },
+  { name: "Suíça", iso2: "CH", lat: 47, lon: 8 },
+  { name: "Polônia", iso2: "PL", lat: 52, lon: 20 },
+  { name: "Argentina", iso2: "AR", lat: -34, lon: -64 },
+  { name: "Suécia", iso2: "SE", lat: 62, lon: 15 },
+  { name: "Bélgica", iso2: "BE", lat: 50, lon: 4 },
+  { name: "Tailândia", iso2: "TH", lat: 15, lon: 101 },
+  { name: "Irlanda", iso2: "IE", lat: 53, lon: -8 },
+  { name: "Israel", iso2: "IL", lat: 31, lon: 35 },
+  { name: "Nigéria", iso2: "NG", lat: 9, lon: 8 },
+  { name: "Áustria", iso2: "AT", lat: 47, lon: 14 },
+  { name: "Emirados Árabes", iso2: "AE", lat: 24, lon: 54 },
+  { name: "Noruega", iso2: "NO", lat: 61, lon: 8 },
+  { name: "Egito", iso2: "EG", lat: 26, lon: 30 },
+  { name: "África do Sul", iso2: "ZA", lat: -29, lon: 24 },
+  { name: "Filipinas", iso2: "PH", lat: 13, lon: 122 },
+  { name: "Vietnã", iso2: "VN", lat: 16, lon: 108 },
+  { name: "Bangladesh", iso2: "BD", lat: 24, lon: 90 },
+  { name: "Chile", iso2: "CL", lat: -30, lon: -71 },
+  { name: "Colômbia", iso2: "CO", lat: 4, lon: -74 },
+  { name: "Peru", iso2: "PE", lat: -10, lon: -76 },
+  { name: "Portugal", iso2: "PT", lat: 39, lon: -8 },
+  { name: "Dinamarca", iso2: "DK", lat: 56, lon: 10 },
+  { name: "Malásia", iso2: "MY", lat: 4, lon: 102 },
+  { name: "Singapura", iso2: "SG", lat: 1, lon: 104 },
+  { name: "Nova Zelândia", iso2: "NZ", lat: -41, lon: 174 },
+  { name: "Finlândia", iso2: "FI", lat: 64, lon: 26 },
+];
+
+const MACRO_INDICATORS = {
+  gdp: "NY.GDP.MKTP.CD",
+  inflation: "FP.CPI.TOTL.ZG",
+  unemployment: "SL.UEM.TOTL.ZS",
+  debt: "GC.DOD.TOTL.GD.ZS",
+  realInterest: "FR.INR.RINR",
+};
+
+async function fetchWorldBankIndicator(iso2, code) {
+  try {
+    const res = await fetch(`https://api.worldbank.org/v2/country/${iso2}/indicator/${code}?format=json&mrv=6`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const rows = json?.[1];
+    if (!Array.isArray(rows)) return null;
+    const found = rows.find((r) => r.value !== null && r.value !== undefined);
+    return found ? { value: found.value, date: found.date } : null;
+  } catch {
+    return null;
+  }
+}
+
+function isoToFlagEmoji(iso2) {
+  return iso2.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
+}
+
+function formatGDP(value) {
+  if (value == null) return "Sem dado";
+  if (value >= 1e12) return `US$ ${(value / 1e12).toLocaleString("pt-BR", { maximumFractionDigits: 2 })} tri`;
+  if (value >= 1e9) return `US$ ${(value / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} bi`;
+  return `US$ ${value.toLocaleString("pt-BR")}`;
+}
+
+function formatPct(value) {
+  if (value == null) return "Sem dado";
+  return `${value.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`;
+}
+
+function latLonToVector3(lat, lon, radius) {
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lon + 180) * (Math.PI / 180);
+  return new THREE.Vector3(
+    -radius * Math.sin(phi) * Math.cos(theta),
+    radius * Math.cos(phi),
+    radius * Math.sin(phi) * Math.sin(theta)
+  );
+}
+
+function MacroMapView() {
+  const mountRef = useRef(null);
+  const [hovered, setHovered] = useState(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const [selected, setSelected] = useState(null);
+  const [countryData, setCountryData] = useState(null);
+  const [loadingData, setLoadingData] = useState(false);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+
+    const width = mount.clientWidth;
+    const height = mount.clientHeight;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+    camera.position.z = 6.2;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    mount.appendChild(renderer.domElement);
+
+    const globeGroup = new THREE.Group();
+    scene.add(globeGroup);
+
+    const RADIUS = 2.3;
+
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(RADIUS, 48, 48),
+      new THREE.MeshPhongMaterial({ color: 0x0f1b2d, emissive: 0x0a1220, shininess: 4 })
+    );
+    globeGroup.add(sphere);
+
+    const wireframe = new THREE.Mesh(
+      new THREE.SphereGeometry(RADIUS + 0.006, 32, 32),
+      new THREE.MeshBasicMaterial({ color: 0x22c55e, wireframe: true, transparent: true, opacity: 0.12 })
+    );
+    globeGroup.add(wireframe);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(5, 3, 5);
+    scene.add(dirLight);
+
+    const markers = [];
+    MACRO_COUNTRIES.forEach((country) => {
+      const pos = latLonToVector3(country.lat, country.lon, RADIUS + 0.035);
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.045, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0x22c55e })
+      );
+      marker.position.copy(pos);
+      marker.userData.country = country;
+      globeGroup.add(marker);
+      markers.push(marker);
+    });
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Mesh.threshold = 0.05;
+    const pointerNDC = new THREE.Vector2();
+
+    let dragging = false;
+    let lastX = 0, lastY = 0;
+    let moved = 0;
+    let autoRotate = true;
+
+    const getRect = () => renderer.domElement.getBoundingClientRect();
+
+    const onPointerDown = (e) => {
+      dragging = true;
+      moved = 0;
+      autoRotate = false;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    };
+
+    const onPointerMove = (e) => {
+      const rect = getRect();
+      pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      if (dragging) {
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        moved += Math.abs(dx) + Math.abs(dy);
+        globeGroup.rotation.y += dx * 0.006;
+        globeGroup.rotation.x = Math.max(-1.1, Math.min(1.1, globeGroup.rotation.x + dy * 0.006));
+        lastX = e.clientX;
+        lastY = e.clientY;
+        return;
+      }
+
+      raycaster.setFromCamera(pointerNDC, camera);
+      const hits = raycaster.intersectObjects(markers);
+      if (hits.length > 0) {
+        setHovered(hits[0].object.userData.country);
+        setTooltipPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        renderer.domElement.style.cursor = "pointer";
+      } else {
+        setHovered(null);
+        renderer.domElement.style.cursor = "grab";
+      }
+    };
+
+    const onPointerUp = (e) => {
+      dragging = false;
+      setTimeout(() => { autoRotate = true; }, 1200);
+      if (moved < 6) {
+        const rect = getRect();
+        pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointerNDC, camera);
+        const hits = raycaster.intersectObjects(markers);
+        if (hits.length > 0) {
+          loadCountry(hits[0].object.userData.country);
+        }
+      }
+    };
+
+    renderer.domElement.style.cursor = "grab";
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+
+    let rafId;
+    const animate = () => {
+      if (autoRotate) globeGroup.rotation.y += 0.0016;
+      renderer.render(scene, camera);
+      rafId = requestAnimationFrame(animate);
+    };
+    animate();
+
+    const handleResize = () => {
+      const w = mount.clientWidth;
+      const h = mount.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(mount);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      resizeObserver.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      renderer.dispose();
+      if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
+    };
+  }, []);
+
+  const loadCountry = async (country) => {
+    setSelected(country);
+    setCountryData(null);
+    setLoadingData(true);
+    const [gdp, inflation, unemployment, debt, realInterest] = await Promise.all([
+      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.gdp),
+      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.inflation),
+      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.unemployment),
+      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.debt),
+      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.realInterest),
+    ]);
+    setCountryData({ gdp, inflation, unemployment, debt, realInterest });
+    setLoadingData(false);
+  };
+
+  return (
+    <div>
+      <div className="tf-macro-layout">
+        <div className="tf-macro-globe-wrap">
+          <div className="tf-macro-globe" ref={mountRef} />
+          {hovered && (
+            <div className="tf-macro-tooltip" style={{ left: tooltipPos.x + 14, top: tooltipPos.y + 6 }}>
+              {isoToFlagEmoji(hovered.iso2)} {hovered.name}
+            </div>
+          )}
+          <p className="tf-muted" style={{ fontSize: 11, textAlign: "center", marginTop: 10 }}>
+            Arraste pra girar · clique num ponto verde pra ver os dados do país
+          </p>
+        </div>
+
+        <div className="tf-card tf-macro-panel">
+          {!selected && (
+            <div style={{ textAlign: "center", padding: "30px 10px" }}>
+              <Globe size={28} className="tf-muted" />
+              <p className="tf-muted" style={{ fontSize: 13, marginTop: 12 }}>
+                Clique em um país no globo pra ver os indicadores macroeconômicos.
+              </p>
+            </div>
+          )}
+
+          {selected && (
+            <>
+              <div className="tf-macro-panel-head">
+                <span style={{ fontSize: 26 }}>{isoToFlagEmoji(selected.iso2)}</span>
+                <h3 style={{ margin: 0 }}>{selected.name}</h3>
+              </div>
+
+              {loadingData ? (
+                <div style={{ textAlign: "center", padding: "24px 0" }}>
+                  <Loader2 size={22} className="tf-spin" />
+                  <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 10 }}>Buscando dados...</p>
+                </div>
+              ) : (
+                <div className="tf-macro-indicators">
+                  <div className="tf-macro-indicator-row">
+                    <span className="tf-muted">PIB {countryData?.gdp?.date && `(${countryData.gdp.date})`}</span>
+                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatGDP(countryData?.gdp?.value)}</span>
+                  </div>
+                  <div className="tf-macro-indicator-row">
+                    <span className="tf-muted">Inflação {countryData?.inflation?.date && `(${countryData.inflation.date})`}</span>
+                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.inflation?.value)}</span>
+                  </div>
+                  <div className="tf-macro-indicator-row">
+                    <span className="tf-muted">Desemprego {countryData?.unemployment?.date && `(${countryData.unemployment.date})`}</span>
+                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.unemployment?.value)}</span>
+                  </div>
+                  <div className="tf-macro-indicator-row">
+                    <span className="tf-muted">Dívida pública (% PIB) {countryData?.debt?.date && `(${countryData.debt.date})`}</span>
+                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.debt?.value)}</span>
+                  </div>
+                  <div className="tf-macro-indicator-row">
+                    <span className="tf-muted">Juros reais {countryData?.realInterest?.date && `(${countryData.realInterest.date})`}</span>
+                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.realInterest?.value)}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      <p className="tf-muted" style={{ fontSize: 11, marginTop: 16, maxWidth: 700 }}>
+        Dados públicos do Banco Mundial (World Bank Open Data), atualizados por eles anualmente — por isso o ano de referência aparece ao lado de cada indicador.
+        "Juros reais" é uma aproximação (taxa de juros real da economia) e não é exatamente a taxa básica do Banco Central de cada país.
+        Cobre as principais economias do mundo; países menores podem não ter todos os indicadores disponíveis.
+      </p>
+    </div>
+  );
+}
+
 const TOOL_TABS = [
   { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
   { id: "impostos", label: "Calculadora de Imposto", icon: Scale },
+  { id: "mapamacro", label: "Mapa Macro", icon: Globe },
 ];
 
 function ToolsView() {
@@ -1218,6 +1564,7 @@ function ToolsView() {
 
       {tab === "risco" && <RiskManagerTool />}
       {tab === "impostos" && <TaxCalculatorTool />}
+      {tab === "mapamacro" && <MacroMapView />}
     </div>
   );
 }
@@ -1797,6 +2144,20 @@ const APP_STYLES = `
 }
 .tf-subtab.active{background:var(--lime);color:#06280F;border-color:var(--lime);}
 .tf-subtab:not(.active):hover{border-color:var(--lime);color:var(--text);}
+
+.tf-macro-layout{display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start;}
+.tf-macro-globe-wrap{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;position:relative;}
+.tf-macro-globe{width:100%;height:440px;border-radius:12px;overflow:hidden;position:relative;touch-action:none;}
+.tf-macro-globe canvas{display:block;}
+.tf-macro-tooltip{
+  position:absolute;background:#0B1119;border:1px solid var(--border);color:var(--text);
+  font-size:12px;font-weight:600;padding:5px 10px;border-radius:8px;pointer-events:none;
+  white-space:nowrap;z-index:5;
+}
+.tf-macro-panel{min-height:440px;}
+.tf-macro-panel-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+.tf-macro-indicators{display:flex;flex-direction:column;gap:12px;}
+.tf-macro-indicator-row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-form-row input,.tf-form-row select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13.5px;outline:none;width:100%;color-scheme:dark;}
 .tf-form-row-inline{display:grid;grid-template-columns:1fr 1fr;gap:12px;} .tf-form-inline-3{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:12px;align-items:end;}
@@ -1945,6 +2306,8 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-form-row-inline{ grid-template-columns:1fr; }
   .tf-form-inline-3{ grid-template-columns:1fr; }
   .tf-riskmgr-grid{ grid-template-columns:1fr 1fr; }
+  .tf-macro-layout{ grid-template-columns:1fr; }
+  .tf-macro-globe{ height:340px; }
 
   .tf-view-header h1{ font-size:19px; }
   .tf-view-header{ flex-direction:column; align-items:stretch; }
