@@ -6,7 +6,7 @@ import {
   LayoutDashboard, CalendarDays, Wallet, Wrench, CreditCard, TrendingUp,
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
-  Pencil, Trash2, Filter, Sun, Moon,
+  Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -112,6 +112,7 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
+    { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
     { id: "profile", label: "Perfil", icon: User },
@@ -784,6 +785,110 @@ function PlansView({ currentPlan }) {
   );
 }
 
+function NewsView() {
+  const [events, setEvents] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("economic-calendar");
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(data.error);
+      setEvents(data.events || []);
+    } catch (err) {
+      console.error(err);
+      setError("Não deu pra carregar o calendário agora. Tenta de novo em instantes.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const grouped = useMemo(() => {
+    if (!events) return [];
+    const map = {};
+    events.forEach((e) => {
+      const day = (e.date || "").slice(0, 10);
+      if (!map[day]) map[day] = [];
+      map[day].push(e);
+    });
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+  }, [events]);
+
+  const formatDay = (isoDay) => {
+    const d = new Date(isoDay + "T12:00:00");
+    const today = new Date();
+    const isToday = d.toDateString() === today.toDateString();
+    const label = d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+    return isToday ? `Hoje · ${label}` : label;
+  };
+
+  const formatTime = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "--:--";
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Notícias</h1><p className="tf-muted">Calendário econômico dos próximos dias</p></div>
+        <button className="tf-btn-outline" onClick={load} disabled={loading}>
+          <RefreshCw size={15} className={loading ? "tf-spin" : ""} /> Atualizar
+        </button>
+      </div>
+
+      {loading && !events && (
+        <div className="tf-card" style={{ textAlign: "center", padding: 40 }}>
+          <p className="tf-muted">Carregando calendário...</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="tf-card" style={{ borderColor: "var(--coral)", display: "flex", gap: 10, alignItems: "center" }}>
+          <AlertCircle size={18} color="var(--coral)" />
+          <p style={{ margin: 0, fontSize: 13.5 }}>{error}</p>
+        </div>
+      )}
+
+      {!loading && !error && grouped.length === 0 && (
+        <div className="tf-card" style={{ textAlign: "center", padding: 40 }}>
+          <p className="tf-muted">Nenhum evento de destaque nos próximos dias.</p>
+        </div>
+      )}
+
+      {grouped.map(([day, dayEvents]) => (
+        <div key={day} style={{ marginBottom: 26 }}>
+          <h4 className="tf-news-day-title">{formatDay(day)}</h4>
+          <div className="tf-news-list">
+            {dayEvents.map((e, i) => (
+              <div className="tf-news-item" key={i}>
+                <div className="tf-news-time">{formatTime(e.date)}</div>
+                <div className={`tf-news-impact ${e.impact === "High" ? "high" : "medium"}`} />
+                <div className="tf-news-body">
+                  <div className="tf-news-title-row">
+                    <span className="tf-news-currency">{e.currency || e.country}</span>
+                    <span>{e.event}</span>
+                  </div>
+                  <div className="tf-news-values">
+                    {e.previous != null && <span>Anterior: <b>{e.previous}</b></span>}
+                    {e.estimate != null && <span>Previsto: <b>{e.estimate}</b></span>}
+                    {e.actual != null && <span>Atual: <b>{e.actual}</b></span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ToolsView() {
   return (
     <div className="tf-view">
@@ -1153,6 +1258,7 @@ export default function App() {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
+      case "news": return <NewsView />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} />;
@@ -1194,6 +1300,15 @@ export default function App() {
           )}
         </>
       )}
+      <a
+        href="https://wa.me/5511993283482?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20Tradefy."
+        target="_blank"
+        rel="noopener"
+        className="tf-wa-float"
+        aria-label="Falar no WhatsApp"
+      >
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="white"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.9C21.96 6.45 17.5 2 12.04 2Zm5.9 14.02c-.25.7-1.45 1.33-2 1.42-.51.08-1.15.11-1.86-.12-.43-.14-.98-.32-1.68-.62-2.96-1.28-4.89-4.26-5.04-4.46-.15-.2-1.21-1.6-1.21-3.06s.77-2.17 1.04-2.47c.27-.3.6-.37.8-.37h.57c.18 0 .43-.07.66.51.25.61.85 2.11.92 2.26.07.15.12.33.02.53-.1.2-.15.32-.3.5-.15.18-.31.4-.44.53-.15.15-.3.31-.13.6.17.3.76 1.26 1.64 2.04 1.13 1.01 2.08 1.32 2.38 1.47.3.15.47.13.65-.08.18-.2.75-.87.95-1.17.2-.3.4-.24.65-.15.27.1 1.71.81 2 .96.3.15.5.22.57.35.08.13.08.75-.17 1.45Z"/></svg>
+      </a>
     </div>
   );
 }
@@ -1204,6 +1319,24 @@ const APP_STYLES = `
 .tf-app * { box-sizing:border-box; }
 .text-lime{color:var(--lime);} .text-coral{color:var(--coral);} .text-blue{color:var(--blue);}
 .tf-mono{font-family:'JetBrains Mono',monospace;} .tf-muted{color:var(--muted);font-size:13px;} .tf-empty{color:var(--muted);font-size:13px;padding:10px 0;}
+
+.tf-spin{animation:tfSpin 1s linear infinite;}
+@keyframes tfSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+.tf-news-day-title{font-family:'Exo 2',sans-serif;font-size:14px;text-transform:capitalize;color:var(--text);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+.tf-news-list{display:flex;flex-direction:column;gap:8px;}
+.tf-news-item{
+  display:flex;align-items:flex-start;gap:12px;background:var(--surface);
+  border:1px solid var(--border);border-radius:12px;padding:13px 16px;
+}
+.tf-news-time{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--muted);min-width:44px;padding-top:2px;}
+.tf-news-impact{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0;}
+.tf-news-impact.high{background:var(--coral);}
+.tf-news-impact.medium{background:#F5A623;}
+.tf-news-body{flex:1;}
+.tf-news-title-row{font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:5px;}
+.tf-news-currency{display:inline-block;background:var(--surface-2);color:var(--muted);font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:5px;margin-right:8px;}
+.tf-news-values{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);}
+.tf-news-values b{color:var(--text);}
 .tf-sidebar{width:210px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 14px;}
 .tf-brand{padding:0 6px 22px;} .tf-brand-center{padding:0 0 6px;justify-content:center;text-align:center;}
 .tf-brand-name{font-family:'Exo 2',sans-serif;font-weight:700;font-size:16.5px;} .tf-brand-name-lg{font-size:22px;margin-top:6px;}
@@ -1384,6 +1517,16 @@ const APP_STYLES = `
 /* Mobile top bar (hidden on desktop) */
 .tf-mobile-topbar{display:none;}
 .tf-hamburger-btn{display:none;}
+.tf-wa-float{
+  position:fixed; bottom:22px; right:22px; z-index:90;
+  width:54px; height:54px; border-radius:50%;
+  background:#25D366; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 8px 22px rgba(0,0,0,.4); transition:transform .15s;
+}
+.tf-wa-float:hover{transform:scale(1.08);}
+@media (max-width:860px){
+  .tf-wa-float{ width:48px; height:48px; bottom:16px; right:16px; }
+}
 .tf-sidebar-close{display:none;}
 .tf-sidebar-backdrop{display:none;}
 
