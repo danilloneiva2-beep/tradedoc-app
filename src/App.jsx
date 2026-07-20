@@ -989,6 +989,11 @@ function LoginScreen({ onAuth }) {
         <p className="tf-auth-tagline-brand">PERFORMANCE <span className="text-lime">QUE EVOLUI.</span></p>
         <p className="tf-muted" style={{ fontSize: 11.5, margin: "-8px 0 14px" }}>Acesso liberado após confirmação do plano.</p>
 
+        <a href="https://tradefyapp.com.br/#planos" target="_blank" rel="noopener" className="tf-signup-cta-banner">
+          <span>Ainda não é assinante? <b>Conheça os planos e assine aqui</b></span>
+          <ArrowRight size={14} />
+        </a>
+
         <form className="tf-form" onSubmit={submit}>
           <div className="tf-form-row">
             <label>E-mail</label>
@@ -1007,6 +1012,11 @@ function LoginScreen({ onAuth }) {
         <button className="tf-skip-link" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
           {mode === "login" ? "Não tem conta? Criar agora →" : "Já tem conta? Entrar →"}
         </button>
+        {mode === "signup" && (
+          <p className="tf-muted" style={{ fontSize: 11, textAlign: "center", marginTop: 10 }}>
+            Já comprou um plano? Use o mesmo e-mail da compra pra liberar o acesso automaticamente.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1524,6 +1534,15 @@ const APP_STYLES = `
 .tf-toggle-group button.active.tone-loss{background:rgba(255,92,114,0.18);color:var(--coral);}
 .tf-form-submit{justify-content:center;margin-top:4px;}
 .tf-skip-link{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;margin-top:12px;text-decoration:underline;}
+
+.tf-signup-cta-banner{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  background:rgba(34,197,94,0.10); border:1px solid rgba(34,197,94,0.35);
+  border-radius:10px; padding:11px 14px; margin-bottom:16px;
+  font-size:12.5px; color:var(--text); text-decoration:none;
+}
+.tf-signup-cta-banner b{color:var(--lime);}
+.tf-signup-cta-banner svg{flex-shrink:0; color:var(--lime);}
 .tf-modal-overlay{position:fixed;inset:0;background:rgba(5,7,12,0.6);display:flex;align-items:center;justify-content:center;z-index:20;}
 .tf-modal{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin:20px;}
 .tf-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
