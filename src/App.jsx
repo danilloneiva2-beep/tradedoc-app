@@ -1043,11 +1043,181 @@ function RiskManagerTool() {
   );
 }
 
+function TaxCalculatorB3() {
+  const [opType, setOpType] = useState("day"); // day | swing
+  const [assetType, setAssetType] = useState("acoes"); // acoes | outros
+  const [monthlyProfit, setMonthlyProfit] = useState("");
+  const [monthlySales, setMonthlySales] = useState("");
+  const [previousLosses, setPreviousLosses] = useState("");
+
+  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const profit = num(monthlyProfit);
+  const sales = num(monthlySales);
+  const losses = num(previousLosses);
+
+  const hasProfit = profit > 0;
+  const rate = opType === "day" ? 20 : 15;
+  const isExempt = opType === "swing" && assetType === "acoes" && sales > 0 && sales <= 20000;
+  const taxableBase = hasProfit ? Math.max(0, profit - losses) : 0;
+  const taxDue = hasProfit && !isExempt ? taxableBase * (rate / 100) : 0;
+
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Calculadora de Imposto — B3</h3></div>
+      <p className="tf-muted" style={{ marginTop: -6, marginBottom: 18, fontSize: 12.5, maxWidth: 560 }}>
+        Estimativa do DARF mensal com base no seu resultado. Vale pra ações, mini índice, mini dólar e outros ativos da bolsa brasileira.
+      </p>
+
+      <div className="tf-riskmgr-grid">
+        <div className="tf-form-row">
+          <label>Tipo de operação</label>
+          <select value={opType} onChange={(e) => setOpType(e.target.value)}>
+            <option value="day">Day trade</option>
+            <option value="swing">Swing trade</option>
+          </select>
+        </div>
+        {opType === "swing" && (
+          <div className="tf-form-row">
+            <label>Tipo de ativo</label>
+            <select value={assetType} onChange={(e) => setAssetType(e.target.value)}>
+              <option value="acoes">Ações</option>
+              <option value="outros">Outros (mini índice, mini dólar, FIIs...)</option>
+            </select>
+          </div>
+        )}
+        <div className="tf-form-row">
+          <label>Lucro líquido no mês (R$)</label>
+          <input value={monthlyProfit} onChange={(e) => setMonthlyProfit(e.target.value)} placeholder="1500" inputMode="decimal" />
+        </div>
+        {opType === "swing" && assetType === "acoes" && (
+          <div className="tf-form-row">
+            <label>Total vendido no mês (R$)</label>
+            <input value={monthlySales} onChange={(e) => setMonthlySales(e.target.value)} placeholder="15000" inputMode="decimal" />
+          </div>
+        )}
+        <div className="tf-form-row">
+          <label>Prejuízo a compensar (R$)</label>
+          <input value={previousLosses} onChange={(e) => setPreviousLosses(e.target.value)} placeholder="0" inputMode="decimal" />
+        </div>
+      </div>
+
+      {monthlyProfit !== "" && (
+        <>
+          {!hasProfit ? (
+            <p className="text-lime" style={{ fontSize: 13, marginTop: 18 }}>
+              Sem lucro tributável nesse mês — não há DARF a pagar. Se houve prejuízo, ele pode ser compensado em meses futuros na mesma categoria de operação.
+            </p>
+          ) : isExempt ? (
+            <p className="text-lime" style={{ fontSize: 13, marginTop: 18 }}>
+              Isento! Vendas de ações em swing trade até R$ 20.000 no mês não pagam imposto sobre o lucro.
+            </p>
+          ) : (
+            <div className="tf-stats-grid" style={{ marginTop: 18 }}>
+              <StatCard icon={Scale} label="Base de cálculo" value={`R$ ${taxableBase.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+              <StatCard icon={Percent} label="Alíquota aplicada" value={`${rate}%`} tone="neutral" />
+              <StatCard icon={ShieldCheck} label="DARF estimado" value={`R$ ${taxDue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="down" />
+            </div>
+          )}
+        </>
+      )}
+
+      <p className="tf-muted" style={{ fontSize: 11, marginTop: 18 }}>
+        Estimativa educacional, não substitui a apuração feita por um contador. O DARF vence no último dia útil do mês seguinte. A isenção de R$ 20.000 vale só pra vendas de ações em swing trade, não vale pra day trade nem pra outros ativos.
+      </p>
+    </div>
+  );
+}
+
+function TaxCalculatorForex() {
+  const [monthlyProfit, setMonthlyProfit] = useState("");
+  const [previousLosses, setPreviousLosses] = useState("");
+  const [rate, setRate] = useState("15");
+
+  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const profit = num(monthlyProfit);
+  const losses = num(previousLosses);
+  const r = num(rate);
+
+  const hasProfit = profit > 0;
+  const taxableBase = hasProfit ? Math.max(0, profit - losses) : 0;
+  const taxDue = taxableBase * (r / 100);
+
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Calculadora de Imposto — Forex</h3></div>
+      <p className="tf-muted" style={{ marginTop: -6, marginBottom: 4, fontSize: 12.5, maxWidth: 560 }}>
+        A tributação de Forex pra quem mora no Brasil varia bastante — depende de como você opera (corretora nacional autorizada, conta no exterior, etc). Por isso a alíquota aqui é editável: ajuste com base na orientação do seu contador.
+      </p>
+
+      <div className="tf-riskmgr-grid">
+        <div className="tf-form-row">
+          <label>Lucro líquido no mês (R$)</label>
+          <input value={monthlyProfit} onChange={(e) => setMonthlyProfit(e.target.value)} placeholder="1500" inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Prejuízo a compensar (R$)</label>
+          <input value={previousLosses} onChange={(e) => setPreviousLosses(e.target.value)} placeholder="0" inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Alíquota estimada (%)</label>
+          <input value={rate} onChange={(e) => setRate(e.target.value)} placeholder="15" inputMode="decimal" />
+        </div>
+      </div>
+
+      {monthlyProfit !== "" && (
+        hasProfit ? (
+          <div className="tf-stats-grid" style={{ marginTop: 18 }}>
+            <StatCard icon={Scale} label="Base de cálculo" value={`R$ ${taxableBase.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+            <StatCard icon={ShieldCheck} label="Imposto estimado" value={`R$ ${taxDue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="down" />
+          </div>
+        ) : (
+          <p className="text-lime" style={{ fontSize: 13, marginTop: 18 }}>
+            Sem lucro tributável nesse mês.
+          </p>
+        )
+      )}
+
+      <p className="tf-muted" style={{ fontSize: 11, marginTop: 18 }}>
+        Isso é só uma estimativa educacional com a alíquota que você informar — não é orientação fiscal. Pra Forex especialmente, o ideal é confirmar o enquadramento certo (carnê-leão, ganho de capital, etc) com um contador.
+      </p>
+    </div>
+  );
+}
+
+function TaxCalculatorTool() {
+  const [market, setMarket] = useState("b3"); // b3 | forex
+  return (
+    <div>
+      <div className="tf-subtabs" style={{ marginBottom: 16 }}>
+        <button className={`tf-subtab ${market === "b3" ? "active" : ""}`} onClick={() => setMarket("b3")}>B3</button>
+        <button className={`tf-subtab ${market === "forex" ? "active" : ""}`} onClick={() => setMarket("forex")}>Forex</button>
+      </div>
+      {market === "b3" ? <TaxCalculatorB3 /> : <TaxCalculatorForex />}
+    </div>
+  );
+}
+
+const TOOL_TABS = [
+  { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
+  { id: "impostos", label: "Calculadora de Imposto", icon: Scale },
+];
+
 function ToolsView() {
+  const [tab, setTab] = useState("risco");
   return (
     <div className="tf-view">
-      <div className="tf-view-header"><div><h1>Ferramentas</h1><p className="tf-muted">Gerenciamento de risco pra B3 e Forex</p></div></div>
-      <RiskManagerTool />
+      <div className="tf-view-header"><div><h1>Ferramentas</h1><p className="tf-muted">Tudo pra planejar risco e organizar sua parte fiscal</p></div></div>
+
+      <div className="tf-subtabs" style={{ marginBottom: 20 }}>
+        {TOOL_TABS.map((t) => (
+          <button key={t.id} className={`tf-subtab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "risco" && <RiskManagerTool />}
+      {tab === "impostos" && <TaxCalculatorTool />}
     </div>
   );
 }
@@ -1617,6 +1787,16 @@ const APP_STYLES = `
 }
 .tf-form{display:flex;flex-direction:column;gap:12px;text-align:left;}
 .tf-riskmgr-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:end;}
+
+.tf-subtabs{display:flex;gap:8px;flex-wrap:wrap;}
+.tf-subtab{
+  display:flex;align-items:center;gap:7px;
+  padding:9px 16px;border-radius:10px;border:1px solid var(--border);
+  background:var(--surface);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;
+  transition:all .15s;
+}
+.tf-subtab.active{background:var(--lime);color:#06280F;border-color:var(--lime);}
+.tf-subtab:not(.active):hover{border-color:var(--lime);color:var(--text);}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-form-row input,.tf-form-row select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13.5px;outline:none;width:100%;color-scheme:dark;}
 .tf-form-row-inline{display:grid;grid-template-columns:1fr 1fr;gap:12px;} .tf-form-inline-3{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:12px;align-items:end;}
