@@ -865,105 +865,39 @@ function PlansView({ currentPlan }) {
 }
 
 function NewsView() {
-  const [events, setEvents] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const containerRef = useRef(null);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data, error: fnError } = await supabase.functions.invoke("economic-calendar");
-      if (fnError) throw fnError;
-      if (data?.error) throw new Error(data.error);
-      setEvents(data.events || []);
-    } catch (err) {
-      console.error(err);
-      setError("Não deu pra carregar o calendário agora. Tenta de novo em instantes.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!containerRef.current) return;
+    containerRef.current.innerHTML = "";
 
-  useEffect(() => { load(); }, []);
+    const widgetDiv = document.createElement("div");
+    widgetDiv.className = "tradingview-widget-container__widget";
+    containerRef.current.appendChild(widgetDiv);
 
-  const grouped = useMemo(() => {
-    if (!events) return [];
-    const map = {};
-    events.forEach((e) => {
-      const day = (e.date || "").slice(0, 10);
-      if (!map[day]) map[day] = [];
-      map[day].push(e);
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      colorTheme: "dark",
+      isTransparent: true,
+      width: "100%",
+      height: "680",
+      locale: "br",
+      importanceFilter: "-1,0,1",
     });
-    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
-  }, [events]);
-
-  const formatDay = (isoDay) => {
-    const d = new Date(isoDay + "T12:00:00");
-    const today = new Date();
-    const isToday = d.toDateString() === today.toDateString();
-    const label = d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
-    return isToday ? `Hoje · ${label}` : label;
-  };
-
-  const formatTime = (iso) => {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "--:--";
-    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  };
+    containerRef.current.appendChild(script);
+  }, []);
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Notícias</h1><p className="tf-muted">Calendário econômico dos próximos dias</p></div>
-        <button className="tf-btn-outline" onClick={load} disabled={loading}>
-          <RefreshCw size={15} className={loading ? "tf-spin" : ""} /> Atualizar
-        </button>
+        <div><h1>Notícias</h1><p className="tf-muted">Calendário econômico em tempo real</p></div>
       </div>
-
-      {loading && !events && (
-        <div className="tf-card" style={{ textAlign: "center", padding: 40 }}>
-          <p className="tf-muted">Carregando calendário...</p>
-        </div>
-      )}
-
-      {error && (
-        <div className="tf-card" style={{ borderColor: "var(--coral)", display: "flex", gap: 10, alignItems: "center" }}>
-          <AlertCircle size={18} color="var(--coral)" />
-          <p style={{ margin: 0, fontSize: 13.5 }}>{error}</p>
-        </div>
-      )}
-
-      {!loading && !error && grouped.length === 0 && (
-        <div className="tf-card" style={{ textAlign: "center", padding: 40 }}>
-          <p className="tf-muted">Nenhum evento de destaque nos próximos dias.</p>
-        </div>
-      )}
-
-      {grouped.map(([day, dayEvents]) => (
-        <div key={day} style={{ marginBottom: 26 }}>
-          <h4 className="tf-news-day-title">{formatDay(day)}</h4>
-          <div className="tf-news-list">
-            {dayEvents.map((e, i) => (
-              <div className="tf-news-item" key={i}>
-                <div className="tf-news-time">{formatTime(e.date)}</div>
-                <div className={`tf-news-impact ${e.impact === "High" ? "high" : "medium"}`} />
-                <div className="tf-news-body">
-                  <div className="tf-news-title-row">
-                    <span className="tf-news-currency">{e.currency || e.country}</span>
-                    <span>{e.event}</span>
-                  </div>
-                  <div className="tf-news-values">
-                    {e.previous != null && <span>Anterior: <b>{e.previous}</b></span>}
-                    {e.estimate != null && <span>Previsto: <b>{e.estimate}</b></span>}
-                    {e.actual != null && <span>Atual: <b>{e.actual}</b></span>}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="tf-card" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="tradingview-widget-container" ref={containerRef} />
+      </div>
     </div>
   );
 }
