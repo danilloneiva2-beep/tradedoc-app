@@ -113,6 +113,7 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
+    { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck, badge: "Em breve" },
     { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
@@ -140,6 +141,7 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
           {items.map((it) => (
             <button key={it.id} onClick={() => handleSelect(it.id)} className={`tf-nav-item ${active === it.id ? "active" : ""}`}>
               <it.icon size={17} /><span>{it.label}</span>
+              {it.badge && <span className="tf-nav-badge">{it.badge}</span>}
             </button>
           ))}
         </nav>
@@ -966,6 +968,54 @@ function NewsView() {
   );
 }
 
+function PropDeskView({ isProPlan }) {
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Gerenciamento Mesa Prop</h1><p className="tf-muted">Gestão de risco pensada pra quem opera em mesa proprietária</p></div>
+      </div>
+
+      <div className="tf-card tf-propdesk-card">
+        <div className="tf-pending-icon" style={{ background: "rgba(34,197,94,0.14)", color: "var(--lime)" }}>
+          <ShieldCheck size={22} />
+        </div>
+        <span className="tf-propdesk-tag">Em desenvolvimento</span>
+        <h2 className="tf-onboarding-title" style={{ marginBottom: 10 }}>Essa novidade tá chegando</h2>
+        <p className="tf-muted" style={{ maxWidth: 480, margin: "0 auto 20px" }}>
+          Estamos construindo uma ferramenta de gerenciamento de risco feita sob medida pra quem opera com regras de mesa proprietária —
+          acompanhamento de limites diários, controle de drawdown e alertas pra te manter dentro das regras da sua mesa.
+        </p>
+
+        <div className="tf-propdesk-info">
+          <div className="tf-propdesk-info-item">
+            <span className="tf-muted" style={{ fontSize: 11.5 }}>Disponível a partir de</span>
+            <span className="tf-mono" style={{ fontWeight: 700 }}>01/08/2026</span>
+          </div>
+          <div className="tf-propdesk-info-item">
+            <span className="tf-muted" style={{ fontSize: 11.5 }}>Plano</span>
+            <span className="tf-mono" style={{ fontWeight: 700, color: "var(--lime)" }}>Exclusivo Pro</span>
+          </div>
+        </div>
+
+        {isProPlan ? (
+          <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 18 }}>
+            Seu plano Pro já vai te dar acesso automático assim que a ferramenta for lançada — não precisa fazer nada.
+          </p>
+        ) : (
+          <>
+            <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", display: "inline-block", marginTop: 8 }}>
+              Fazer upgrade para o Pro
+            </a>
+            <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 12 }}>
+              Faça upgrade agora e já entre garantido no lançamento.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ToolsView() {
   return (
     <div className="tf-view">
@@ -1334,6 +1384,7 @@ export default function App() {
     switch (active) {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
+      case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView />;
       case "tools": return <ToolsView />;
@@ -1421,6 +1472,12 @@ const APP_STYLES = `
 .tf-brand-mark-img{height:24px;width:auto;flex-shrink:0;}
 .tf-nav{display:flex;flex-direction:column;gap:3px;flex:1;}
 .tf-nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;border:none;background:transparent;color:var(--muted);font-size:13.5px;font-weight:500;cursor:pointer;text-align:left;}
+.tf-nav-badge{margin-left:auto;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;background:rgba(34,197,94,0.16);color:var(--lime);padding:2px 7px;border-radius:20px;flex-shrink:0;}
+
+.tf-propdesk-card{text-align:center;padding:44px 24px;}
+.tf-propdesk-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;background:var(--surface-2);color:var(--muted);padding:4px 12px;border-radius:20px;margin-bottom:14px;}
+.tf-propdesk-info{display:flex;justify-content:center;gap:32px;margin-top:8px;flex-wrap:wrap;}
+.tf-propdesk-info-item{display:flex;flex-direction:column;gap:4px;align-items:center;}
 .tf-nav-item:hover{background:var(--surface-2);color:var(--text);} .tf-nav-item.active{background:var(--blue-dim);color:#C9DAFF;}
 .tf-sidebar-footer{border-top:1px solid var(--border);padding-top:14px;}
 .tf-user-chip{display:flex;align-items:center;gap:8px;padding:6px 4px;background:none;border:none;cursor:pointer;width:100%;border-radius:7px;text-align:left;}
