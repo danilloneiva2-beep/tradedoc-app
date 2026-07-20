@@ -950,10 +950,104 @@ function PropDeskView({ isProPlan }) {
   );
 }
 
+const ASSET_PRESETS = [
+  { group: "B3", label: "Mini Índice (WIN)", pointValue: 0.20, currency: "R$", unit: "ponto" },
+  { group: "B3", label: "Mini Dólar (WDO)", pointValue: 10.00, currency: "R$", unit: "ponto" },
+  { group: "B3", label: "Índice Futuro (IND)", pointValue: 1.00, currency: "R$", unit: "ponto" },
+  { group: "B3", label: "Dólar Futuro (DOL)", pointValue: 50.00, currency: "R$", unit: "ponto" },
+  { group: "B3", label: "Ações / outro ativo B3", pointValue: "", currency: "R$", unit: "ponto" },
+  { group: "Forex", label: "Lote Padrão (100.000)", pointValue: 10, currency: "US$", unit: "pip" },
+  { group: "Forex", label: "Mini Lote (10.000)", pointValue: 1, currency: "US$", unit: "pip" },
+  { group: "Forex", label: "Micro Lote (1.000)", pointValue: 0.10, currency: "US$", unit: "pip" },
+  { group: "Forex", label: "Personalizado", pointValue: "", currency: "US$", unit: "pip" },
+];
+
+function RiskManagerTool() {
+  const [capital, setCapital] = useState("");
+  const [riskPct, setRiskPct] = useState("1");
+  const [assetIdx, setAssetIdx] = useState(0);
+  const [pointValue, setPointValue] = useState(ASSET_PRESETS[0].pointValue);
+  const [stopPoints, setStopPoints] = useState("");
+
+  const asset = ASSET_PRESETS[assetIdx];
+
+  useEffect(() => {
+    setPointValue(ASSET_PRESETS[assetIdx].pointValue);
+  }, [assetIdx]);
+
+  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const cap = num(capital);
+  const risk = num(riskPct);
+  const stop = num(stopPoints);
+  const pv = num(pointValue);
+
+  const riskAmount = cap * (risk / 100);
+  const lossPerUnit = stop * pv;
+  const suggestedSize = lossPerUnit > 0 ? Math.floor(riskAmount / lossPerUnit) : 0;
+  const showResult = cap > 0 && stop > 0 && pv > 0;
+
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Gerenciamento por Ativo</h3></div>
+      <p className="tf-muted" style={{ marginTop: -6, marginBottom: 18, fontSize: 12.5, maxWidth: 560 }}>
+        Informe seu capital e o ativo que vai operar — a ferramenta calcula quantos contratos ou lotes usar sem passar do risco que você definir. Funciona pra B3 (mini índice, mini dólar, futuros) e Forex (lotes).
+      </p>
+
+      <div className="tf-riskmgr-grid">
+        <div className="tf-form-row">
+          <label>Capital disponível</label>
+          <input value={capital} onChange={(e) => setCapital(e.target.value)} placeholder="10000" inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Risco por operação (%)</label>
+          <input value={riskPct} onChange={(e) => setRiskPct(e.target.value)} placeholder="1" inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Ativo</label>
+          <select value={assetIdx} onChange={(e) => setAssetIdx(Number(e.target.value))}>
+            <optgroup label="B3">
+              {ASSET_PRESETS.map((a, i) => a.group === "B3" && <option key={i} value={i}>{a.label}</option>)}
+            </optgroup>
+            <optgroup label="Forex">
+              {ASSET_PRESETS.map((a, i) => a.group === "Forex" && <option key={i} value={i}>{a.label}</option>)}
+            </optgroup>
+          </select>
+        </div>
+        <div className="tf-form-row">
+          <label>Valor por {asset.unit} ({asset.currency})</label>
+          <input value={pointValue} onChange={(e) => setPointValue(e.target.value)} inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Distância do stop ({asset.unit}s)</label>
+          <input value={stopPoints} onChange={(e) => setStopPoints(e.target.value)} placeholder="50" inputMode="decimal" />
+        </div>
+      </div>
+
+      {showResult && (
+        <div className="tf-stats-grid" style={{ marginTop: 20 }}>
+          <StatCard icon={ShieldCheck} label="Risco máximo da operação" value={`${asset.currency} ${riskAmount.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+          <StatCard icon={Hash} label={asset.group === "B3" ? "Contratos sugeridos" : "Lotes sugeridos"} value={suggestedSize} tone={suggestedSize > 0 ? "up" : "down"} />
+          <StatCard icon={Scale} label="Perda por unidade no stop" value={`${asset.currency} ${lossPerUnit.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+        </div>
+      )}
+      {showResult && suggestedSize === 0 && (
+        <p className="text-coral" style={{ fontSize: 12.5, marginTop: 14 }}>
+          Com esse stop e esse risco, nem 1 contrato/lote cabe no seu limite. Aumenta o capital, diminui o stop, ou ajusta o % de risco.
+        </p>
+      )}
+
+      <p className="tf-muted" style={{ fontSize: 11, marginTop: 18 }}>
+        Valores de referência — confirme o valor exato por ponto/pip com sua corretora antes de operar. Isso não é recomendação de investimento.
+      </p>
+    </div>
+  );
+}
+
 function ToolsView() {
   return (
     <div className="tf-view">
-      <div className="tf-view-header"><div><h1>Ferramentas</h1><p className="tf-muted">Calculadora de risco, simulador de metas e mais — chegando nessa área em breve.</p></div></div>
+      <div className="tf-view-header"><div><h1>Ferramentas</h1><p className="tf-muted">Gerenciamento de risco pra B3 e Forex</p></div></div>
+      <RiskManagerTool />
     </div>
   );
 }
@@ -1522,6 +1616,7 @@ const APP_STYLES = `
   100%{height:0; opacity:.35;}
 }
 .tf-form{display:flex;flex-direction:column;gap:12px;text-align:left;}
+.tf-riskmgr-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:end;}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-form-row input,.tf-form-row select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:13.5px;outline:none;width:100%;color-scheme:dark;}
 .tf-form-row-inline{display:grid;grid-template-columns:1fr 1fr;gap:12px;} .tf-form-inline-3{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:12px;align-items:end;}
@@ -1669,6 +1764,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-tools-grid{ grid-template-columns:1fr; }
   .tf-form-row-inline{ grid-template-columns:1fr; }
   .tf-form-inline-3{ grid-template-columns:1fr; }
+  .tf-riskmgr-grid{ grid-template-columns:1fr 1fr; }
 
   .tf-view-header h1{ font-size:19px; }
   .tf-view-header{ flex-direction:column; align-items:stretch; }
