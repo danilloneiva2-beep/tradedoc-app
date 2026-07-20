@@ -494,59 +494,13 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
         </div>
       </div>
 
-      <div className="tf-cal-summary">
-        <div className="tf-cal-stats-grid">
-          <StatCard icon={TrendingUp} label="Resultado total do mês" value={fmtBRL(monthTotal)} tone={monthTotal >= 0 ? "up" : "down"} />
-          <StatCard icon={Target} label="Taxa de acerto do mês" value={`${monthWinRate}%`} tone="up" />
-          <StatCard icon={Hash} label="Operações do mês" value={monthTrades.length} tone="neutral" />
-          <StatCard icon={Scale} label="RR (ratio) do mês" value={monthRR} tone="neutral" />
-          <StatCard icon={ArrowUpRight} label="Lucro bruto do mês" value={fmtBRL(grossWin)} tone="up" />
-          <StatCard icon={TrendingDown} label="Prejuízo bruto do mês" value={fmtBRL(-grossLoss)} tone="down" />
-        </div>
-
-        <div className="tf-cal-charts-col">
-          <div className="tf-card">
-            <div className="tf-card-head"><h3>Gráfico de patrimônio do mês</h3></div>
-            {monthEquityCurve.length === 0 ? (
-              <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={160}>
-                <AreaChart data={monthEquityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="calEqFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#22C55E" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="#1C2537" vertical={false} />
-                  <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Resultado acumulado"]} />
-                  <Area type="monotone" dataKey="eq" stroke="#22C55E" strokeWidth={2.5} fill="url(#calEqFill)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div className="tf-card">
-            <div className="tf-card-head"><h3>Desempenho diário</h3></div>
-            {dailyPerf.length === 0 ? (
-              <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
-            ) : (
-              <div className="tf-weekday-list">
-                {dailyPerf.map((d) => (
-                  <div className="tf-weekday-row" key={d.day}>
-                    <span className="tf-weekday-label">Dia {String(d.day).padStart(2, "0")}</span>
-                    <div className="tf-weekday-bar-track">
-                      <div className={`tf-weekday-bar-fill ${d.pnl >= 0 ? "fill-lime" : "fill-coral"}`} style={{ width: `${Math.max(2, (Math.abs(d.pnl) / maxAbsDaily) * 100)}%` }} />
-                    </div>
-                    <span className={`tf-mono tf-weekday-value ${d.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(d.pnl)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+      <div className="tf-cal-stats-row">
+        <StatCard icon={TrendingUp} label="Resultado total do mês" value={fmtBRL(monthTotal)} tone={monthTotal >= 0 ? "up" : "down"} />
+        <StatCard icon={Target} label="Taxa de acerto do mês" value={`${monthWinRate}%`} tone="up" />
+        <StatCard icon={Hash} label="Operações do mês" value={monthTrades.length} tone="neutral" />
+        <StatCard icon={Scale} label="RR (ratio) do mês" value={monthRR} tone="neutral" />
+        <StatCard icon={ArrowUpRight} label="Lucro bruto do mês" value={fmtBRL(grossWin)} tone="up" />
+        <StatCard icon={TrendingDown} label="Prejuízo bruto do mês" value={fmtBRL(-grossLoss)} tone="down" />
       </div>
 
       <div className="tf-card">
@@ -572,6 +526,50 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
               )}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="tf-two-col">
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Gráfico de patrimônio do mês</h3></div>
+          {monthEquityCurve.length === 0 ? (
+            <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={monthEquityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="calEqFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#22C55E" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#2563EB" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#1C2537" vertical={false} />
+                <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} domain={["auto", "auto"]} />
+                <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Resultado acumulado"]} />
+                <Area type="monotone" dataKey="eq" stroke="#22C55E" strokeWidth={2.5} fill="url(#calEqFill)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Desempenho diário</h3></div>
+          {dailyPerf.length === 0 ? (
+            <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
+          ) : (
+            <div className="tf-weekday-list">
+              {dailyPerf.map((d) => (
+                <div className="tf-weekday-row" key={d.day}>
+                  <span className="tf-weekday-label">Dia {String(d.day).padStart(2, "0")}</span>
+                  <div className="tf-weekday-bar-track">
+                    <div className={`tf-weekday-bar-fill ${d.pnl >= 0 ? "fill-lime" : "fill-coral"}`} style={{ width: `${Math.max(2, (Math.abs(d.pnl) / maxAbsDaily) * 100)}%` }} />
+                  </div>
+                  <span className={`tf-mono tf-weekday-value ${d.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(d.pnl)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1450,9 +1448,7 @@ const APP_STYLES = `
 .tf-card-head h3{font-family:'Exo 2',sans-serif;font-size:14.5px;font-weight:600;margin:0;}
 .tf-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
 
-.tf-cal-summary{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start;}
-.tf-cal-stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
-.tf-cal-charts-col{display:flex;flex-direction:column;gap:16px;}
+.tf-cal-stats-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px;}
 .tf-stat{display:flex;flex-direction:column;gap:6px;} .tf-stat-top{display:flex;align-items:center;justify-content:space-between;}
 .tf-stat-label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-icon-badge{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;}
@@ -1704,7 +1700,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 
 @media (max-width: 380px) {
   .tf-stats-grid{ grid-template-columns:1fr; }
-  .tf-cal-summary{ grid-template-columns:1fr; }
+  .tf-cal-stats-row{ grid-template-columns:repeat(2,1fr); }
   .tf-table-row{ grid-template-columns:1fr .6fr .8fr; }
   .tf-table-row span:nth-child(3){ display:none; }
 }
