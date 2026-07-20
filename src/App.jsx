@@ -1298,6 +1298,7 @@ function latLonToVector3(lat, lon, radius) {
 
 function MacroMapView() {
   const mountRef = useRef(null);
+  const labelRefs = useRef([]);
   const [hovered, setHovered] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [selected, setSelected] = useState(null);
@@ -1331,9 +1332,23 @@ function MacroMapView() {
     );
     globeGroup.add(sphere);
 
+    // Textura de mapa-múndi (continentes visíveis). Se falhar por qualquer
+    // motivo, a esfera continua funcionando com a cor sólida acima.
+    new THREE.TextureLoader().load(
+      "https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg",
+      (texture) => {
+        sphere.material.map = texture;
+        sphere.material.color.set(0xffffff);
+        sphere.material.emissive.set(0x080c14);
+        sphere.material.needsUpdate = true;
+      },
+      undefined,
+      () => console.warn("Não foi possível carregar a textura do globo, usando cor sólida.")
+    );
+
     const wireframe = new THREE.Mesh(
       new THREE.SphereGeometry(RADIUS + 0.006, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0x22c55e, wireframe: true, transparent: true, opacity: 0.12 })
+      new THREE.MeshBasicMaterial({ color: 0x22c55e, wireframe: true, transparent: true, opacity: 0.06 })
     );
     globeGroup.add(wireframe);
 
@@ -1347,7 +1362,7 @@ function MacroMapView() {
     MACRO_COUNTRIES.forEach((country) => {
       const pos = latLonToVector3(country.lat, country.lon, RADIUS + 0.035);
       const marker = new THREE.Mesh(
-        new THREE.SphereGeometry(0.045, 10, 10),
+        new THREE.SphereGeometry(0.065, 12, 12),
         new THREE.MeshBasicMaterial({ color: 0x22c55e })
       );
       marker.position.copy(pos);
@@ -1357,7 +1372,7 @@ function MacroMapView() {
     });
 
     const raycaster = new THREE.Raycaster();
-    raycaster.params.Mesh.threshold = 0.05;
+    raycaster.params.Mesh.threshold = 0.12;
     const pointerNDC = new THREE.Vector2();
 
     let dragging = false;
@@ -1424,8 +1439,31 @@ function MacroMapView() {
     window.addEventListener("pointerup", onPointerUp);
 
     let rafId;
+    const tempVec = new THREE.Vector3();
     const animate = () => {
       if (autoRotate) globeGroup.rotation.y += 0.0016;
+
+      const rect = getRect();
+      markers.forEach((marker, i) => {
+        const label = labelRefs.current[i];
+        if (!label) return;
+        marker.getWorldPosition(tempVec);
+        const normal = tempVec.clone().normalize();
+        const towardCamera = camera.position.clone().normalize();
+        const facing = normal.dot(towardCamera);
+
+        if (facing > 0.2) {
+          const projected = tempVec.clone().project(camera);
+          const x = (projected.x * 0.5 + 0.5) * rect.width;
+          const y = (-projected.y * 0.5 + 0.5) * rect.height;
+          label.style.display = "block";
+          label.style.transform = `translate(${x}px, ${y}px)`;
+          label.style.opacity = Math.min(1, (facing - 0.2) * 2.5);
+        } else {
+          label.style.display = "none";
+        }
+      });
+
       renderer.render(scene, camera);
       rafId = requestAnimationFrame(animate);
     };
@@ -1472,6 +1510,16 @@ function MacroMapView() {
       <div className="tf-macro-layout">
         <div className="tf-macro-globe-wrap">
           <div className="tf-macro-globe" ref={mountRef} />
+          {MACRO_COUNTRIES.map((c, i) => (
+            <div
+              key={c.iso2}
+              ref={(el) => (labelRefs.current[i] = el)}
+              className="tf-macro-label"
+              onClick={() => loadCountry(c)}
+            >
+              {c.name}
+            </div>
+          ))}
           {hovered && (
             <div className="tf-macro-tooltip" style={{ left: tooltipPos.x + 14, top: tooltipPos.y + 6 }}>
               {isoToFlagEmoji(hovered.iso2)} {hovered.name}
@@ -2154,6 +2202,16 @@ const APP_STYLES = `
   font-size:12px;font-weight:600;padding:5px 10px;border-radius:8px;pointer-events:none;
   white-space:nowrap;z-index:5;
 }
+.tf-macro-label{
+  position:absolute; top:0; left:0; pointer-events:auto; cursor:pointer;
+  font-size:10.5px; font-weight:700; color:#F5F7FA;
+  background:rgba(11,17,25,0.72); border:1px solid rgba(34,197,94,0.4);
+  padding:2px 7px; border-radius:20px; white-space:nowrap;
+  transform:translate(-9999px,-9999px);
+  margin-left:8px; margin-top:-9px;
+  display:none; z-index:4; transition:opacity .15s;
+}
+.tf-macro-label:hover{background:rgba(34,197,94,0.25); border-color:var(--lime);}
 .tf-macro-panel{min-height:440px;}
 .tf-macro-panel-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
 .tf-macro-indicators{display:flex;flex-direction:column;gap:12px;}
