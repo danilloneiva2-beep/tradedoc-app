@@ -1626,6 +1626,11 @@ function LoginScreen({ onAuth }) {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState("");
 
   const submit = async (e) => {
     e.preventDefault();
@@ -1640,6 +1645,50 @@ function LoginScreen({ onAuth }) {
     }
     setLoading(false);
   };
+
+  const submitForgot = async (e) => {
+    e.preventDefault();
+    setForgotError(""); setForgotLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: window.location.origin,
+    });
+    setForgotLoading(false);
+    if (error) setForgotError(error.message);
+    else setForgotSent(true);
+  };
+
+  if (forgotOpen) {
+    return (
+      <div className="tf-auth-screen">
+        <div className="tf-auth-card">
+          <div className="tf-brand tf-brand-center"><div className="tf-brand-name tf-brand-name-lg">TRADE<span className="text-lime">FY</span></div></div>
+          <h2 className="tf-onboarding-title" style={{ marginTop: 8 }}>Recuperar senha</h2>
+          {forgotSent ? (
+            <p className="text-lime" style={{ fontSize: 13.5, textAlign: "center", margin: "16px 0" }}>
+              Se esse e-mail tiver uma conta no Tradefy, enviamos um link pra você redefinir a senha. Confere sua caixa de entrada (e o spam).
+            </p>
+          ) : (
+            <form className="tf-form" onSubmit={submitForgot}>
+              <p className="tf-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 4 }}>
+                Informa o e-mail da sua conta que a gente manda um link pra você criar uma senha nova.
+              </p>
+              <div className="tf-form-row">
+                <label>E-mail</label>
+                <div className="tf-input-icon"><Mail size={15} /><input type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} placeholder="voce@email.com" required /></div>
+              </div>
+              {forgotError && <p className="text-coral" style={{ fontSize: 12.5, margin: 0 }}>{forgotError}</p>}
+              <button type="submit" className="tf-btn-primary tf-form-submit" disabled={forgotLoading}>
+                {forgotLoading ? "Enviando..." : "Enviar link de recuperação"} <ArrowRight size={15} />
+              </button>
+            </form>
+          )}
+          <button className="tf-skip-link" onClick={() => { setForgotOpen(false); setForgotSent(false); setForgotError(""); }}>
+            ← Voltar pro login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="tf-auth-screen">
@@ -1662,6 +1711,11 @@ function LoginScreen({ onAuth }) {
             <label>Senha</label>
             <div className="tf-input-icon"><Lock size={15} /><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="mín. 6 caracteres" required minLength={6} /></div>
           </div>
+          {mode === "login" && (
+            <button type="button" className="tf-forgot-link" onClick={() => { setForgotOpen(true); setForgotEmail(email); }}>
+              Esqueci minha senha
+            </button>
+          )}
           {error && <p className="text-coral" style={{ fontSize: 12.5, margin: 0 }}>{error}</p>}
           {info && <p className="text-lime" style={{ fontSize: 12.5, margin: 0 }}>{info}</p>}
           <button type="submit" className="tf-btn-primary tf-form-submit" disabled={loading}>
@@ -1675,6 +1729,61 @@ function LoginScreen({ onAuth }) {
           <p className="tf-muted" style={{ fontSize: 11, textAlign: "center", marginTop: 10 }}>
             Já comprou um plano? Use o mesmo e-mail da compra pra liberar o acesso automaticamente.
           </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (password.length < 6) { setError("A senha precisa ter pelo menos 6 caracteres."); return; }
+    if (password !== confirm) { setError("As senhas não são iguais."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) setError(error.message);
+    else setSuccess(true);
+  };
+
+  return (
+    <div className="tf-auth-screen">
+      <div className="tf-auth-card">
+        <div className="tf-brand tf-brand-center"><div className="tf-brand-name tf-brand-name-lg">TRADE<span className="text-lime">FY</span></div></div>
+        <h2 className="tf-onboarding-title" style={{ marginTop: 8 }}>Definir nova senha</h2>
+
+        {success ? (
+          <>
+            <p className="text-lime" style={{ fontSize: 13.5, textAlign: "center", margin: "16px 0" }}>
+              Senha alterada com sucesso!
+            </p>
+            <button className="tf-btn-primary tf-form-submit" onClick={onDone}>
+              Continuar <ArrowRight size={15} />
+            </button>
+          </>
+        ) : (
+          <form className="tf-form" onSubmit={submit}>
+            <div className="tf-form-row">
+              <label>Nova senha</label>
+              <div className="tf-input-icon"><Lock size={15} /><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="mín. 6 caracteres" required minLength={6} /></div>
+            </div>
+            <div className="tf-form-row">
+              <label>Confirmar nova senha</label>
+              <div className="tf-input-icon"><Lock size={15} /><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="repete a senha" required minLength={6} /></div>
+            </div>
+            {error && <p className="text-coral" style={{ fontSize: 12.5, margin: 0 }}>{error}</p>}
+            <button type="submit" className="tf-btn-primary tf-form-submit" disabled={loading}>
+              {loading ? "Salvando..." : "Salvar nova senha"} <ArrowRight size={15} />
+            </button>
+          </form>
         )}
       </div>
     </div>
@@ -1790,6 +1899,7 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
 
 export default function App() {
   const [session, setSession] = useState(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [loadingSession, setLoadingSession] = useState(true);
   const [loadingUserData, setLoadingUserData] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -1837,7 +1947,8 @@ export default function App() {
       setSession(data.session);
       setLoadingSession(false);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, sess) => {
+      if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
       setSession(sess);
     });
     return () => listener.subscription.unsubscribe();
@@ -2000,17 +2111,21 @@ export default function App() {
   return (
     <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
       <style>{APP_STYLES}</style>
-      {!session && <LoginScreen />}
-      {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
-      {session && profile && !hasActiveAccess && (
-        <AccessPendingScreen onLogout={handleLogout} onRefresh={loadUserData} />
-      )}
-      {session && profile && hasActiveAccess && (
+      {recoveryMode ? (
+        <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />
+      ) : (
         <>
-          <div className="tf-mobile-topbar">
-            <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)}><Menu size={20} /></button>
-            <img src={LOGO_MARK} alt="Tradefy" className="tf-brand-mark-img" />
-            <span className="tf-brand-name">TRADE<span className="text-lime">FY</span></span>
+          {!session && <LoginScreen />}
+          {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
+          {session && profile && !hasActiveAccess && (
+            <AccessPendingScreen onLogout={handleLogout} onRefresh={loadUserData} />
+          )}
+          {session && profile && hasActiveAccess && (
+            <>
+              <div className="tf-mobile-topbar">
+                <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)}><Menu size={20} /></button>
+                <img src={LOGO_MARK} alt="Tradefy" className="tf-brand-mark-img" />
+                <span className="tf-brand-name">TRADE<span className="text-lime">FY</span></span>
           </div>
           <Sidebar
             active={active}
@@ -2029,6 +2144,8 @@ export default function App() {
               onSubmit={async (updatedFields) => { await handleUpdateTrade(editingTrade, updatedFields); setEditingTrade(null); }}
             />
           )}
+        </>
+      )}
         </>
       )}
       <a
@@ -2228,6 +2345,7 @@ const APP_STYLES = `
 .tf-toggle-group button.active.tone-loss{background:rgba(255,92,114,0.18);color:var(--coral);}
 .tf-form-submit{justify-content:center;margin-top:4px;}
 .tf-skip-link{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;margin-top:12px;text-decoration:underline;}
+.tf-forgot-link{background:none;border:none;color:var(--lime);font-size:12px;cursor:pointer;text-decoration:underline;align-self:flex-end;margin-top:-6px;padding:0;}
 
 .tf-signup-cta-banner{
   display:flex; align-items:center; justify-content:space-between; gap:8px;
