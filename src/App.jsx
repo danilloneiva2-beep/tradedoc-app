@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -8,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -161,6 +163,227 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
 
 /* ---------------------------- New trade modal ---------------------------- */
 
+/* --------------------------- Importação de relatórios (MT5 / ProfitPro) --------------------------- */
+
+function brNumberToFloat(v) {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  if (!s) return 0;
+  // formato brasileiro: milhar com ponto, decimal com vírgula
+  const cleaned = s.replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
+function mt5DateToISO(raw) {
+  // "2026.07.01 03:37:42" -> "2026-07-01"
+  const datePart = String(raw).trim().split(" ")[0];
+  return datePart.replace(/\./g, "-");
+}
+
+function profitProDateToISO(raw) {
+  // "08/07/2026 09:01:23" -> "2026-07-08"
+  const datePart = String(raw).trim().split(" ")[0];
+  const [d, m, y] = datePart.split("/");
+  if (!d || !m || !y) return null;
+  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+// Lê um relatório de posições do MetaTrader 5 (.xlsx exportado do terminal)
+function parseMT5Report(rows) {
+  // Acha a linha de cabeçalho da tabela "Posições"
+  const headerIdx = rows.findIndex(
+    (r) => Array.isArray(r) && r.some((c) => String(c).trim() === "Position") && r.some((c) => String(c).trim() === "Lucro")
+  );
+  if (headerIdx === -1) {
+    throw new Error("Não encontrei a tabela de Posições nesse arquivo. Confirma se é um relatório de histórico exportado do MT5.");
+  }
+  const header = rows[headerIdx].map((c) => String(c).trim());
+  const col = (name) => header.indexOf(name);
+  const idxOpenTime = 0; // primeira coluna "Horário" (abertura)
+  const idxAsset = col("Ativo") !== -1 ? col("Ativo") : 2;
+  const idxTipo = col("Tipo") !== -1 ? col("Tipo") : 3;
+  const idxComissao = col("Comissão") !== -1 ? col("Comissão") : header.length - 3;
+  const idxSwap = col("Swap") !== -1 ? col("Swap") : header.length - 2;
+  const idxLucro = col("Lucro") !== -1 ? col("Lucro") : header.length - 1;
+
+  const results = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length === 0) continue;
+    const first = String(row[0] || "").trim();
+    if (!first || first === "Ordens" || !/^\d{4}\./.test(first)) break; // fim da tabela de posições
+
+    const asset = String(row[idxAsset] || "").trim().replace(/\.\w+$/, ""); // remove sufixo tipo ".h"
+    const tipo = String(row[idxTipo] || "").trim().toLowerCase();
+    if (!asset || (tipo !== "buy" && tipo !== "sell")) continue;
+
+    const lucro = brNumberToFloat(row[idxLucro]);
+    const comissao = brNumberToFloat(row[idxComissao]);
+    const swap = brNumberToFloat(row[idxSwap]);
+    const pnl = lucro + comissao + swap;
+
+    results.push({
+      asset,
+      side: tipo === "buy" ? "Compra" : "Venda",
+      pnl: Math.round(pnl * 100) / 100,
+      trade_date: mt5DateToISO(row[idxOpenTime]),
+    });
+  }
+  return results;
+}
+
+// Lê um relatório de operações do ProfitPro / Nelogica (.csv)
+function parseProfitProReport(text) {
+  const lines = text.split(/\r?\n/);
+  const headerIdx = lines.findIndex((l) => l.startsWith("Ativo;") || l.includes("Res. Operação"));
+  if (headerIdx === -1) {
+    throw new Error("Não encontrei a tabela de operações nesse arquivo. Confirma se é um relatório de operações exportado do ProfitPro.");
+  }
+  const csvBlock = lines.slice(headerIdx).join("\n");
+  const parsed = Papa.parse(csvBlock, { header: true, delimiter: ";", skipEmptyLines: true });
+
+  const results = [];
+  for (const row of parsed.data) {
+    const asset = String(row["Ativo"] || "").trim();
+    const lado = String(row["Lado"] || "").trim().toUpperCase();
+    const abertura = row["Abertura"];
+    const resOperacao = row["Res. Operação"];
+    if (!asset || !abertura || resOperacao == null) continue;
+
+    const isoDate = profitProDateToISO(abertura);
+    if (!isoDate) continue;
+
+    results.push({
+      asset,
+      side: lado === "C" ? "Compra" : lado === "V" ? "Venda" : "Compra",
+      pnl: Math.round(brNumberToFloat(resOperacao) * 100) / 100,
+      trade_date: isoDate,
+    });
+  }
+  return results;
+}
+
+function ImportTradesModal({ onClose, onImport, accounts }) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState(null);
+  const [parseError, setParseError] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setRows(null);
+    setParseError("");
+    setParsing(true);
+    try {
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      if (isExcel) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const asRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
+        const parsedRows = parseMT5Report(asRows);
+        if (parsedRows.length === 0) throw new Error("Nenhuma operação encontrada nesse arquivo.");
+        setRows(parsedRows);
+      } else {
+        const text = await file.text();
+        const parsedRows = parseProfitProReport(text);
+        if (parsedRows.length === 0) throw new Error("Nenhuma operação encontrada nesse arquivo.");
+        setRows(parsedRows);
+      }
+    } catch (err) {
+      setParseError(err.message || "Não consegui ler esse arquivo. Confirma se é um relatório exportado direto do MT5 ou do ProfitPro.");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const totalPnl = rows ? rows.reduce((s, r) => s + r.pnl, 0) : 0;
+
+  const confirmImport = async () => {
+    if (!rows || !accountId) return;
+    setImporting(true);
+    await onImport(rows.map((r) => ({ ...r, account_id: accountId })));
+    setImporting(false);
+    setDone(true);
+  };
+
+  return (
+    <div className="tf-modal-overlay" onClick={onClose}>
+      <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()}>
+        <div className="tf-modal-head">
+          <h3>Importar operações</h3>
+          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        {done ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <Check size={32} className="text-lime" />
+            <p style={{ marginTop: 12 }}>{rows.length} operações importadas com sucesso!</p>
+            <button className="tf-btn-primary tf-form-submit" onClick={onClose}>Fechar</button>
+          </div>
+        ) : (
+          <>
+            <div className="tf-form-row">
+              <label>Importar para a conta</label>
+              <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+
+            <div className="tf-import-dropzone">
+              <input type="file" id="tf-import-file" accept=".csv,.xlsx,.xls" onChange={handleFile} style={{ display: "none" }} />
+              <label htmlFor="tf-import-file" className="tf-btn-outline" style={{ cursor: "pointer", display: "inline-flex" }}>
+                <Upload size={15} /> {fileName || "Escolher arquivo (.csv ou .xlsx)"}
+              </label>
+              <p className="tf-muted" style={{ fontSize: 11.5, marginTop: 10 }}>
+                Aceita relatório de histórico do MetaTrader 5 (.xlsx) ou relatório de operações do ProfitPro (.csv).
+              </p>
+            </div>
+
+            {parsing && <p className="tf-muted" style={{ fontSize: 13 }}>Lendo arquivo...</p>}
+            {parseError && <p className="text-coral" style={{ fontSize: 12.5 }}>{parseError}</p>}
+
+            {rows && (
+              <>
+                <div className="tf-import-summary">
+                  <span>{rows.length} operações encontradas</span>
+                  <span className={totalPnl >= 0 ? "text-lime" : "text-coral"}>Resultado total: {fmtBRL(totalPnl)}</span>
+                </div>
+                <div className="tf-import-preview">
+                  <table>
+                    <thead><tr><th>Data</th><th>Ativo</th><th>Lado</th><th>P&L</th></tr></thead>
+                    <tbody>
+                      {rows.slice(0, 50).map((r, i) => (
+                        <tr key={i}>
+                          <td>{r.trade_date}</td>
+                          <td>{r.asset}</td>
+                          <td>{r.side}</td>
+                          <td className={r.pnl >= 0 ? "text-lime" : "text-coral"}>{fmtBRL(r.pnl)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {rows.length > 50 && <p className="tf-muted" style={{ fontSize: 11, padding: 8 }}>Mostrando as primeiras 50 de {rows.length} operações.</p>}
+                </div>
+                <button className="tf-btn-primary tf-form-submit" onClick={confirmImport} disabled={importing || !accountId}>
+                  {importing ? "Importando..." : `Confirmar importação de ${rows.length} operações`}
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) {
   const [asset, setAsset] = useState(editTrade?.asset || "WINFUT");
   const [side, setSide] = useState(editTrade?.side || "Compra");
@@ -283,7 +506,7 @@ function AccountFilterDropdown({ accounts, selected, onChange }) {
   );
 }
 
-function DashboardView({ data, onOpenModal, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter }) {
+function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
   return (
     <div className="tf-view">
@@ -291,6 +514,7 @@ function DashboardView({ data, onOpenModal, onEditTrade, onDeleteTrade, accounts
         <div><h1>Visão geral</h1><p className="tf-muted">Sua performance consolidada</p></div>
         <div className="tf-view-header-actions">
           <AccountFilterDropdown accounts={accounts} selected={accountFilter} onChange={setAccountFilter} />
+          <button className="tf-btn-outline" onClick={onOpenImport}><FileSpreadsheet size={15} /> Importar relatório</button>
           <button className="tf-btn-primary" onClick={onOpenModal}><Plus size={15} /> Novo trade</button>
         </div>
       </div>
@@ -1909,6 +2133,7 @@ export default function App() {
   const [active, setActive] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [accountFilter, setAccountFilter] = useState([]); // [] = todas as contas
   const [theme, setTheme] = useState(() => {
@@ -2005,6 +2230,24 @@ export default function App() {
     await loadUserData();
   };
 
+  const handleImportTrades = async (importedTrades) => {
+    const userId = session.user.id;
+    const rowsToInsert = importedTrades.map((t) => ({ ...t, user_id: userId }));
+    await supabase.from("trades").insert(rowsToInsert);
+
+    const totalByAccount = {};
+    importedTrades.forEach((t) => {
+      totalByAccount[t.account_id] = (totalByAccount[t.account_id] || 0) + t.pnl;
+    });
+    for (const [accId, sum] of Object.entries(totalByAccount)) {
+      const account = accounts.find((a) => a.id === accId);
+      if (account) {
+        await supabase.from("accounts").update({ balance: Number(account.balance) + sum }).eq("id", accId);
+      }
+    }
+    await loadUserData();
+  };
+
   const handleUpdateTrade = async (original, updated) => {
     await supabase.from("trades").update(updated).eq("id", original.id);
 
@@ -2096,7 +2339,7 @@ export default function App() {
 
   const view = (() => {
     switch (active) {
-      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
+      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
@@ -2104,7 +2347,7 @@ export default function App() {
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} />;
-      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
+      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
     }
   })();
 
@@ -2136,6 +2379,7 @@ export default function App() {
           />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
+          {showImportModal && <ImportTradesModal onClose={() => setShowImportModal(false)} onImport={handleImportTrades} accounts={accounts} />}
           {editingTrade && (
             <NewTradeModal
               editTrade={editingTrade}
@@ -2357,6 +2601,13 @@ const APP_STYLES = `
 .tf-signup-cta-banner svg{flex-shrink:0; color:var(--lime);}
 .tf-modal-overlay{position:fixed;inset:0;background:rgba(5,7,12,0.6);display:flex;align-items:center;justify-content:center;z-index:20;}
 .tf-modal{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin:20px;}
+.tf-modal-wide{max-width:560px;}
+.tf-import-dropzone{border:1px dashed var(--border);border-radius:12px;padding:18px;text-align:center;margin:14px 0;}
+.tf-import-summary{display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin:14px 0 10px;padding:10px 14px;background:var(--surface-2);border-radius:10px;}
+.tf-import-preview{max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:14px;}
+.tf-import-preview table{width:100%;border-collapse:collapse;font-size:12px;}
+.tf-import-preview th{position:sticky;top:0;background:var(--surface-2);text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;}
+.tf-import-preview td{padding:7px 10px;border-top:1px solid var(--border);}
 .tf-modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
 .tf-modal-head h3{font-family:'Exo 2',sans-serif;font-size:15.5px;margin:0;}
 .tf-icon-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
