@@ -2226,19 +2226,28 @@ export default function App() {
   const filteredTrades = accountFilter.length === 0 ? trades : trades.filter((t) => filteredAccountIds.includes(t.account_id));
   const data = useDerivedData(filteredTrades, filteredAccountObjs);
 
+  const reportError = (error, action) => {
+    console.error(action, error);
+    alert(`Não consegui ${action}. ${error?.message ? `Detalhe: ${error.message}` : "Tenta de novo em instantes."}`);
+  };
+
   const handleOnboardingComplete = async (name, firstAccount) => {
     const userId = session.user.id;
-    await supabase.from("profiles").insert({ id: userId, name, email: session.user.email });
-    await supabase.from("accounts").insert({ user_id: userId, name: firstAccount.name, type: "Real", balance: firstAccount.balance, status: "Ativa" });
+    const { error: profError } = await supabase.from("profiles").insert({ id: userId, name, email: session.user.email });
+    if (profError) return reportError(profError, "criar seu perfil");
+    const { error: accError } = await supabase.from("accounts").insert({ user_id: userId, name: firstAccount.name, type: "Real", balance: firstAccount.balance, status: "Ativa" });
+    if (accError) return reportError(accError, "criar sua primeira conta");
     await loadUserData();
   };
 
   const handleNewTrade = async (trade) => {
     const userId = session.user.id;
-    await supabase.from("trades").insert({ ...trade, user_id: userId });
+    const { error: insertError } = await supabase.from("trades").insert({ ...trade, user_id: userId });
+    if (insertError) return reportError(insertError, "salvar o trade");
     const account = accounts.find((a) => a.id === trade.account_id);
     if (account) {
-      await supabase.from("accounts").update({ balance: Number(account.balance) + trade.pnl }).eq("id", account.id);
+      const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) + Number(trade.pnl) }).eq("id", account.id);
+      if (updError) return reportError(updError, "atualizar o saldo da conta");
     }
     await loadUserData();
   };
@@ -2246,52 +2255,58 @@ export default function App() {
   const handleImportTrades = async (importedTrades) => {
     const userId = session.user.id;
     const rowsToInsert = importedTrades.map((t) => ({ ...t, user_id: userId }));
-    await supabase.from("trades").insert(rowsToInsert);
+    const { error: insertError } = await supabase.from("trades").insert(rowsToInsert);
+    if (insertError) return reportError(insertError, "importar as operações");
 
     const totalByAccount = {};
     importedTrades.forEach((t) => {
-      totalByAccount[t.account_id] = (totalByAccount[t.account_id] || 0) + t.pnl;
+      totalByAccount[t.account_id] = (totalByAccount[t.account_id] || 0) + Number(t.pnl);
     });
     for (const [accId, sum] of Object.entries(totalByAccount)) {
       const account = accounts.find((a) => a.id === accId);
       if (account) {
-        await supabase.from("accounts").update({ balance: Number(account.balance) + sum }).eq("id", accId);
+        const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) + sum }).eq("id", accId);
+        if (updError) return reportError(updError, "atualizar o saldo depois da importação");
       }
     }
     await loadUserData();
   };
 
   const handleUpdateTrade = async (original, updated) => {
-    await supabase.from("trades").update(updated).eq("id", original.id);
+    const { error: tradeError } = await supabase.from("trades").update(updated).eq("id", original.id);
+    if (tradeError) return reportError(tradeError, "atualizar o trade");
 
     const oldPnl = Number(original.pnl);
     const newPnl = Number(updated.pnl);
 
     if (original.account_id === updated.account_id) {
-      // Same account: apply just the difference
       const account = accounts.find((a) => a.id === updated.account_id);
       if (account) {
-        await supabase.from("accounts").update({ balance: Number(account.balance) - oldPnl + newPnl }).eq("id", account.id);
+        const { error } = await supabase.from("accounts").update({ balance: Number(account.balance) - oldPnl + newPnl }).eq("id", account.id);
+        if (error) return reportError(error, "atualizar o saldo da conta");
       }
     } else {
-      // Moved to a different account: reverse from the old one, apply to the new one
       const oldAccount = accounts.find((a) => a.id === original.account_id);
       const newAccount = accounts.find((a) => a.id === updated.account_id);
       if (oldAccount) {
-        await supabase.from("accounts").update({ balance: Number(oldAccount.balance) - oldPnl }).eq("id", oldAccount.id);
+        const { error } = await supabase.from("accounts").update({ balance: Number(oldAccount.balance) - oldPnl }).eq("id", oldAccount.id);
+        if (error) return reportError(error, "atualizar o saldo da conta antiga");
       }
       if (newAccount) {
-        await supabase.from("accounts").update({ balance: Number(newAccount.balance) + newPnl }).eq("id", newAccount.id);
+        const { error } = await supabase.from("accounts").update({ balance: Number(newAccount.balance) + newPnl }).eq("id", newAccount.id);
+        if (error) return reportError(error, "atualizar o saldo da nova conta");
       }
     }
     await loadUserData();
   };
 
   const handleDeleteTrade = async (trade) => {
-    await supabase.from("trades").delete().eq("id", trade.id);
+    const { error: delError } = await supabase.from("trades").delete().eq("id", trade.id);
+    if (delError) return reportError(delError, "apagar o trade");
     const account = accounts.find((a) => a.id === trade.account_id);
     if (account) {
-      await supabase.from("accounts").update({ balance: Number(account.balance) - Number(trade.pnl) }).eq("id", account.id);
+      const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) - Number(trade.pnl) }).eq("id", account.id);
+      if (updError) return reportError(updError, "atualizar o saldo depois de apagar o trade");
     }
     await loadUserData();
   };
@@ -2312,18 +2327,24 @@ export default function App() {
       return;
     }
     const userId = session.user.id;
-    await supabase.from("accounts").insert({ ...acc, user_id: userId });
+    const { error } = await supabase.from("accounts").insert({ ...acc, user_id: userId });
+    if (error) return reportError(error, "criar a conta");
     await loadUserData();
   };
 
   const handleUpdateAccount = async (accountId, fields) => {
-    await supabase.from("accounts").update(fields).eq("id", accountId);
+    const { error } = await supabase.from("accounts").update(fields).eq("id", accountId);
+    if (error) return reportError(error, "salvar as alterações da conta");
     await loadUserData();
   };
 
   const handleDeleteAccount = async (accountId) => {
-    // A exclusão de trades vinculados é feita automaticamente pelo banco (ON DELETE CASCADE)
-    await supabase.from("accounts").delete().eq("id", accountId);
+    // Apaga os trades vinculados primeiro, explicitamente — não depende de
+    // nenhuma configuração de cascade lá no banco pra funcionar.
+    const { error: tradesError } = await supabase.from("trades").delete().eq("account_id", accountId);
+    if (tradesError) return reportError(tradesError, "apagar os trades dessa conta");
+    const { error: accError } = await supabase.from("accounts").delete().eq("id", accountId);
+    if (accError) return reportError(accError, "apagar a conta");
     await loadUserData();
   };
 
