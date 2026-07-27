@@ -177,7 +177,14 @@ function brNumberToFloat(v) {
 }
 
 function mt5DateToISO(raw) {
-  // "2026.07.01 03:37:42" -> "2026-07-01"
+  // Alguns exports guardam a data como texto ("2026.07.01 03:37:42"),
+  // outros como data nativa do Excel — tratamos os dois casos.
+  if (raw instanceof Date) {
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, "0");
+    const d = String(raw.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
   const datePart = String(raw).trim().split(" ")[0];
   return datePart.replace(/\./g, "-");
 }
@@ -212,8 +219,10 @@ function parseMT5Report(rows) {
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length === 0) continue;
-    const first = String(row[0] || "").trim();
-    if (!first || first === "Ordens" || !/^\d{4}\./.test(first)) break; // fim da tabela de posições
+    const rawFirst = row[0];
+    const isDateLike = rawFirst instanceof Date || /^\d{4}\./.test(String(rawFirst || "").trim());
+    const firstStr = String(rawFirst || "").trim();
+    if (!firstStr || firstStr === "Ordens" || !isDateLike) break; // fim da tabela de posições
 
     const asset = String(row[idxAsset] || "").trim().replace(/\.\w+$/, ""); // remove sufixo tipo ".h"
     const tipo = String(row[idxTipo] || "").trim().toLowerCase();
@@ -285,9 +294,13 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
       const isExcel = /\.(xlsx|xls)$/i.test(file.name);
       if (isExcel) {
         const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array" });
+        const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const asRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false });
+        // raw:true é essencial aqui — o MT5 costuma formatar perdas em
+        // vermelho SEM o sinal de "-" na célula (só a cor indica negativo).
+        // Ler o texto formatado (raw:false) perde esse sinal; raw:true pega
+        // o número de verdade guardado por trás da célula.
+        const asRows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
         const parsedRows = parseMT5Report(asRows);
         if (parsedRows.length === 0) throw new Error("Nenhuma operação encontrada nesse arquivo.");
         setRows(parsedRows);
