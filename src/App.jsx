@@ -254,28 +254,58 @@ function parseMT5Report(rows) {
 
 // Lê um relatório de operações do ProfitPro / Nelogica (.csv)
 function parseProfitProReport(text) {
-  const lines = text.split(/\r?\n/);
-  const headerIdx = lines.findIndex((l) => l.startsWith("Ativo;") || l.includes("Res. Operação"));
+  // Remove o BOM (caractere invisível que arquivos exportados do Windows
+  // costumam colocar no início) — sem isso, a primeira coluna do cabeçalho
+  // ("Ativo") não batia com o texto esperado e nenhuma linha era reconhecida.
+  const cleaned = text.replace(/^\uFEFF/, "");
+  const lines = cleaned.split(/\r?\n/);
+  const headerIdx = lines.findIndex((l) => {
+    const t = l.trim();
+    return t.startsWith("Ativo;") || (t.includes("Ativo") && t.includes("Abertura"));
+  });
   if (headerIdx === -1) {
     throw new Error("Não encontrei a tabela de operações nesse arquivo. Confirma se é um relatório de operações exportado do ProfitPro.");
   }
   const csvBlock = lines.slice(headerIdx).join("\n");
-  const parsed = Papa.parse(csvBlock, { header: true, delimiter: ";", skipEmptyLines: true });
+  const parsed = Papa.parse(csvBlock, {
+    header: true,
+    delimiter: ";",
+    skipEmptyLines: true,
+    transformHeader: (h) => h.replace(/\uFEFF/g, "").trim(),
+  });
+
+  // Procura a coluna certa mesmo que o nome varie um pouco (espaço a mais,
+  // acento diferente, maiúscula/minúscula) — evita quebrar por causa de
+  // pequenas diferenças entre versões do relatório.
+  const findKey = (row, candidates) => {
+    const keys = Object.keys(row);
+    for (const cand of candidates) {
+      const found = keys.find((k) => k.trim().toLowerCase() === cand.toLowerCase());
+      if (found) return found;
+    }
+    return null;
+  };
 
   const results = [];
   for (const row of parsed.data) {
-    const asset = String(row["Ativo"] || "").trim();
-    const lado = String(row["Lado"] || "").trim().toUpperCase();
-    const abertura = row["Abertura"];
-    const resOperacao = row["Res. Operação"];
-    if (!asset || !abertura || resOperacao == null) continue;
+    const assetKey = findKey(row, ["Ativo"]);
+    const ladoKey = findKey(row, ["Lado"]);
+    const aberturaKey = findKey(row, ["Abertura", "Data Abertura", "Data"]);
+    const resKey = findKey(row, ["Res. Operação", "Res.Operação", "Resultado Operação", "Res Operacao", "Resultado"]);
+    if (!assetKey || !aberturaKey || !resKey) continue;
+
+    const asset = String(row[assetKey] || "").trim();
+    const lado = String(row[ladoKey] || "").trim().toUpperCase();
+    const abertura = row[aberturaKey];
+    const resOperacao = row[resKey];
+    if (!asset || !abertura || resOperacao == null || resOperacao === "") continue;
 
     const isoDate = profitProDateToISO(abertura);
     if (!isoDate) continue;
 
     results.push({
       asset,
-      side: lado === "C" ? "Compra" : lado === "V" ? "Venda" : "Compra",
+      side: lado.startsWith("C") ? "Compra" : lado.startsWith("V") ? "Venda" : "Compra",
       pnl: Math.round(brNumberToFloat(resOperacao) * 100) / 100,
       trade_date: isoDate,
     });
@@ -291,6 +321,7 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [done, setDone] = useState(false);
+  const [replaceExisting, setReplaceExisting] = useState(false);
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -314,7 +345,17 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
         if (parsedRows.length === 0) throw new Error("Nenhuma operação encontrada nesse arquivo.");
         setRows(parsedRows);
       } else {
-        const text = await file.text();
+        // Alguns relatórios exportados de programas Windows (como o
+        // ProfitPro/Nelogica) não usam UTF-8, e sim Windows-1252 — isso
+        // corrompe especificamente as letras acentuadas (ex: "Operação"),
+        // fazendo a coluna de resultado nunca ser encontrada, mesmo a
+        // tabela sendo localizada certinho. Detectamos isso e corrigimos
+        // sozinhos, sem precisar que o cliente converta o arquivo.
+        const buffer = await file.arrayBuffer();
+        let text = new TextDecoder("utf-8").decode(buffer);
+        if (text.includes("\uFFFD")) {
+          text = new TextDecoder("windows-1252").decode(buffer);
+        }
         const parsedRows = parseProfitProReport(text);
         if (parsedRows.length === 0) throw new Error("Nenhuma operação encontrada nesse arquivo.");
         setRows(parsedRows);
@@ -331,7 +372,10 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
   const confirmImport = async () => {
     if (!rows || !accountId) return;
     setImporting(true);
-    await onImport(rows.map((r) => ({ ...r, account_id: accountId })));
+    await onImport(
+      rows.map((r) => ({ ...r, account_id: accountId })),
+      { replaceAccountId: replaceExisting ? accountId : null }
+    );
     setImporting(false);
     setDone(true);
   };
@@ -347,7 +391,10 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
         {done ? (
           <div style={{ textAlign: "center", padding: "20px 0" }}>
             <Check size={32} className="text-lime" />
-            <p style={{ marginTop: 12 }}>{rows.length} operações importadas com sucesso!</p>
+            <p style={{ marginTop: 12 }}>
+              {rows.length} operações importadas com sucesso!
+              {replaceExisting && " As operações antigas dessa conta foram substituídas."}
+            </p>
             <button className="tf-btn-primary tf-form-submit" onClick={onClose}>Fechar</button>
           </div>
         ) : (
@@ -358,6 +405,15 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
+
+            <label className="tf-import-replace-check">
+              <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
+              <span>
+                <b>Substituir operações já importadas dessa conta</b>
+                <br />
+                Apaga todos os trades registrados nessa conta antes de importar o arquivo novo — use isso quando for atualizar um relatório que já importou antes, pra não duplicar. Deixa desmarcado se está adicionando um período novo.
+              </span>
+            </label>
 
             <div className="tf-import-dropzone">
               <input type="file" id="tf-import-file" accept=".csv,.xlsx,.xls" onChange={handleFile} style={{ display: "none" }} />
@@ -394,8 +450,8 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
                   </table>
                   {rows.length > 50 && <p className="tf-muted" style={{ fontSize: 11, padding: 8 }}>Mostrando as primeiras 50 de {rows.length} operações.</p>}
                 </div>
-                <button className="tf-btn-primary tf-form-submit" onClick={confirmImport} disabled={importing || !accountId}>
-                  {importing ? "Importando..." : `Confirmar importação de ${rows.length} operações`}
+                <button className={`tf-form-submit ${replaceExisting ? "tf-btn-danger" : "tf-btn-primary"}`} onClick={confirmImport} disabled={importing || !accountId}>
+                  {importing ? "Importando..." : replaceExisting ? `Apagar operações antigas e importar ${rows.length} novas` : `Confirmar importação de ${rows.length} operações`}
                 </button>
               </>
             )}
@@ -2780,8 +2836,36 @@ export default function App() {
     await loadUserData();
   };
 
-  const handleImportTrades = async (importedTrades) => {
+  const handleImportTrades = async (importedTrades, options = {}) => {
     const userId = session.user.id;
+    const { replaceAccountId } = options;
+
+    // Se o cliente marcou "substituir", apaga as operações antigas dessa
+    // conta antes de gravar as novas — evita duplicar quando ele reimporta
+    // um relatório atualizado (ex: baixou o relatório do mês de novo).
+    let removedSum = 0;
+    if (replaceAccountId) {
+      const { data: existingTrades, error: fetchErr } = await supabase
+        .from("trades")
+        .select("id, pnl, screenshot_path")
+        .eq("account_id", replaceAccountId)
+        .eq("user_id", userId);
+      if (fetchErr) return reportError(fetchErr, "buscar as operações antigas dessa conta");
+
+      if (existingTrades && existingTrades.length > 0) {
+        removedSum = existingTrades.reduce((s, t) => s + Number(t.pnl), 0);
+        for (const t of existingTrades) {
+          if (t.screenshot_path) await deleteTradeScreenshot(t.screenshot_path);
+        }
+        const { error: delErr } = await supabase
+          .from("trades")
+          .delete()
+          .eq("account_id", replaceAccountId)
+          .eq("user_id", userId);
+        if (delErr) return reportError(delErr, "apagar as operações antigas dessa conta");
+      }
+    }
+
     const rowsToInsert = importedTrades.map((t) => ({ ...t, user_id: userId }));
     const { error: insertError } = await supabase.from("trades").insert(rowsToInsert);
     if (insertError) return reportError(insertError, "importar as operações");
@@ -2790,6 +2874,9 @@ export default function App() {
     importedTrades.forEach((t) => {
       totalByAccount[t.account_id] = (totalByAccount[t.account_id] || 0) + Number(t.pnl);
     });
+    if (replaceAccountId) {
+      totalByAccount[replaceAccountId] = (totalByAccount[replaceAccountId] || 0) - removedSum;
+    }
     for (const [accId, sum] of Object.entries(totalByAccount)) {
       const { error: updError } = await supabase.rpc("increment_balance", { p_account_id: accId, p_amount: sum });
       if (updError) return reportError(updError, "atualizar o saldo depois da importação");
@@ -3027,6 +3114,15 @@ const APP_STYLES = `
 .tf-filter-divider{height:1px;background:var(--border);margin:4px 2px;}
 .tf-view-header h1{font-family:'Exo 2',sans-serif;font-size:22px;font-weight:600;margin:0 0 4px;}
 .tf-btn-primary{display:inline-flex;align-items:center;gap:6px;background:var(--lime);color:#10170A;border:none;padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;}
+.tf-btn-danger{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--coral);color:#2A0B10;border:none;padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;}
+
+.tf-import-replace-check{
+  display:flex; gap:10px; align-items:flex-start; cursor:pointer;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
+  padding:12px 14px; margin:14px 0; font-size:12px; color:var(--muted); line-height:1.5;
+}
+.tf-import-replace-check input{margin-top:2px; flex-shrink:0;}
+.tf-import-replace-check b{color:var(--text);}
 .tf-btn-outline{padding:9px 15px;border-radius:8px;font-weight:600;font-size:13px;background:transparent;border:1px solid var(--border);color:var(--text);cursor:pointer;}
 .tf-btn-primary:disabled,.tf-btn-outline:disabled{opacity:.55;cursor:not-allowed;}
 .tf-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;}
