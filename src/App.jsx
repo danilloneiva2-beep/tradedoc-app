@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -116,6 +116,7 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
+    { id: "mindset", label: "Mente de Trader", icon: Brain },
     { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck, badge: "Em breve" },
     { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
@@ -419,6 +420,8 @@ async function deleteTradeScreenshot(path) {
   await supabase.storage.from("trade-screenshots").remove([path]);
 }
 
+const MOOD_OPTIONS = ["Calmo", "Confiante", "Ansioso", "Ganancioso", "Frustrado"];
+
 function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) {
   const [asset, setAsset] = useState(editTrade?.asset || "WINFUT");
   const [side, setSide] = useState(editTrade?.side || "Compra");
@@ -426,6 +429,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
   const [outcome, setOutcome] = useState(editTrade ? (Number(editTrade.pnl) >= 0 ? "win" : "loss") : "win");
   const [date, setDate] = useState(editTrade?.trade_date || initialDate || new Date().toISOString().slice(0, 10));
   const [accountId, setAccountId] = useState(editTrade?.account_id || accounts[0]?.id || "");
+  const [mood, setMood] = useState(editTrade?.mood || "");
   const [notes, setNotes] = useState(editTrade?.notes || "");
   const [screenshotFile, setScreenshotFile] = useState(null);
   const [screenshotPreview, setScreenshotPreview] = useState(null);
@@ -470,7 +474,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
       await deleteTradeScreenshot(existingScreenshotPath);
     }
 
-    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId, notes: notes || null, screenshot_path });
+    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId, mood: mood || null, notes: notes || null, screenshot_path });
     setSaving(false);
     onClose();
   };
@@ -518,6 +522,22 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
             <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
+          </div>
+
+          <div className="tf-form-row">
+            <label>Como você estava se sentindo? (opcional)</label>
+            <div className="tf-mood-pills">
+              {MOOD_OPTIONS.map((m) => (
+                <button
+                  type="button"
+                  key={m}
+                  className={`tf-mood-pill ${mood === m ? "active" : ""}`}
+                  onClick={() => setMood(mood === m ? "" : m)}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="tf-form-row">
@@ -1966,6 +1986,95 @@ function MacroMapView() {
   );
 }
 
+function MoodInsightsTool({ trades }) {
+  const stats = useMemo(() => {
+    const byMood = {};
+    trades.forEach((t) => {
+      if (!t.mood) return;
+      if (!byMood[t.mood]) byMood[t.mood] = { sum: 0, count: 0 };
+      byMood[t.mood].sum += Number(t.pnl);
+      byMood[t.mood].count += 1;
+    });
+    return MOOD_OPTIONS.map((m) => ({
+      mood: m,
+      count: byMood[m]?.count || 0,
+      avg: byMood[m]?.count ? byMood[m].sum / byMood[m].count : null,
+    })).filter((s) => s.count > 0).sort((a, b) => b.avg - a.avg);
+  }, [trades]);
+
+  const maxAbs = Math.max(1, ...stats.map((s) => Math.abs(s.avg)));
+
+  const insight = useMemo(() => {
+    const withEnough = stats.filter((s) => s.count >= 3);
+    if (withEnough.length < 2) return null;
+    const best = withEnough[0];
+    const worst = withEnough[withEnough.length - 1];
+    if (worst.avg >= best.avg) return null;
+    if (worst.avg < 0 && best.avg > 0) {
+      const ratio = Math.abs(worst.avg) / best.avg;
+      return `Suas perdas médias são ${ratio.toFixed(1)}x maiores quando você marca "${worst.mood.toLowerCase()}", comparado ao seu melhor humor ("${best.mood.toLowerCase()}").`;
+    }
+    return `Seu resultado médio é bem melhor quando você marca "${best.mood.toLowerCase()}" (${fmtBRL(best.avg)}) do que quando marca "${worst.mood.toLowerCase()}" (${fmtBRL(worst.avg)}).`;
+  }, [stats]);
+
+  const totalTagged = trades.filter((t) => t.mood).length;
+
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Humor x Resultado</h3></div>
+      {totalTagged === 0 ? (
+        <p className="tf-muted" style={{ fontSize: 13 }}>
+          Você ainda não marcou como estava se sentindo em nenhum trade. Da próxima vez que registrar uma operação, escolhe um humor — depois de algumas marcações, esse gráfico começa a mostrar padrões reais.
+        </p>
+      ) : (
+        <>
+          <p className="tf-muted" style={{ fontSize: 12.5, marginTop: -6, marginBottom: 16 }}>
+            Resultado médio por humor marcado, com base em {totalTagged} trade{totalTagged !== 1 ? "s" : ""} com humor registrado.
+          </p>
+          <div className="tf-weekday-list">
+            {stats.map((s) => (
+              <div className="tf-weekday-row" key={s.mood}>
+                <span className="tf-weekday-label">{s.mood}</span>
+                <div className="tf-weekday-bar-track">
+                  <div className={`tf-weekday-bar-fill ${s.avg >= 0 ? "fill-lime" : "fill-coral"}`} style={{ width: `${Math.max(2, (Math.abs(s.avg) / maxAbs) * 100)}%` }} />
+                </div>
+                <span className={`tf-mono tf-weekday-value ${s.avg >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(s.avg)}</span>
+              </div>
+            ))}
+          </div>
+          {insight && (
+            <div className="tf-mood-insight">
+              <AlertTriangle size={16} />
+              <span>{insight}</span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const MIND_TABS = [
+  { id: "humor", label: "Humor x Resultado", icon: Brain },
+];
+
+function MindsetView({ trades }) {
+  const [tab, setTab] = useState("humor");
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header"><div><h1>Mente de Trader</h1><p className="tf-muted">Como seu estado emocional afeta seus resultados</p></div></div>
+      <div className="tf-subtabs" style={{ marginBottom: 20 }}>
+        {MIND_TABS.map((t) => (
+          <button key={t.id} className={`tf-subtab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "humor" && <MoodInsightsTool trades={trades} />}
+    </div>
+  );
+}
+
 const TOOL_TABS = [
   { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
   { id: "impostos", label: "Calculadora de Imposto", icon: Scale },
@@ -2516,6 +2625,7 @@ export default function App() {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
+      case "mindset": return <MindsetView trades={trades} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView />;
       case "tools": return <ToolsView />;
@@ -2655,6 +2765,19 @@ const APP_STYLES = `
 .tf-table-row:last-child{border-bottom:none;} .tf-table-head{color:var(--muted);font-size:11.5px;text-transform:uppercase;}
 .tf-asset{font-weight:600;}
 .tf-trade-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+
+.tf-mood-pills{display:flex;gap:6px;flex-wrap:wrap;}
+.tf-mood-pill{
+  background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
+  font-size:12px;padding:6px 13px;border-radius:20px;cursor:pointer;transition:all .15s;
+}
+.tf-mood-pill.active{background:rgba(255,92,114,0.15);border-color:var(--coral);color:var(--coral);}
+.tf-mood-insight{
+  display:flex;gap:10px;align-items:flex-start;margin-top:16px;
+  background:rgba(255,92,114,0.08);border:1px solid rgba(255,92,114,0.3);
+  border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.5;color:var(--text);
+}
+.tf-mood-insight svg{color:var(--coral);flex-shrink:0;margin-top:1px;}
 
 .tf-textarea{
   width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
