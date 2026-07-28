@@ -1338,6 +1338,7 @@ function NewsView({ trades }) {
   const [items, setItems] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [selectedAsset, setSelectedAsset] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -1357,33 +1358,44 @@ function NewsView({ trades }) {
 
   useEffect(() => { load(); }, []);
 
-  const userKeywords = useMemo(() => {
-    const assets = [...new Set((trades || []).map((t) => t.asset))];
-    const kwSet = new Set();
-    assets.forEach((a) => getNewsKeywordsForAsset(a).forEach((k) => kwSet.add(k)));
-    return [...kwSet];
+  const tradedAssets = useMemo(() => {
+    return [...new Set((trades || []).map((t) => t.asset).filter(Boolean))];
   }, [trades]);
 
-  const { highlighted, rest } = useMemo(() => {
-    if (!items) return { highlighted: [], rest: [] };
-    if (userKeywords.length === 0) return { highlighted: [], rest: items };
-    const h = [], r = [];
-    items.forEach((item) => {
-      const text = `${item.title} ${item.description}`.toLowerCase();
-      if (userKeywords.some((k) => text.includes(k))) h.push(item);
-      else r.push(item);
-    });
-    return { highlighted: h, rest: r };
-  }, [items, userKeywords]);
+  const displayedItems = useMemo(() => {
+    if (!items) return [];
+    if (selectedAsset === "all") return items.slice(0, 3);
+    const keywords = getNewsKeywordsForAsset(selectedAsset);
+    if (keywords.length === 0) return [];
+    return items
+      .filter((item) => {
+        const text = `${item.title} ${item.description}`.toLowerCase();
+        return keywords.some((k) => text.includes(k));
+      })
+      .slice(0, 3);
+  }, [items, selectedAsset]);
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Notícias</h1><p className="tf-muted">Últimas notícias de mercado e calendário econômico</p></div>
+        <div><h1>Notícias</h1><p className="tf-muted">Principais manchetes de mercado e calendário econômico</p></div>
         <button className="tf-btn-outline" onClick={load} disabled={loading}>
           <RefreshCw size={15} className={loading ? "tf-spin" : ""} /> Atualizar
         </button>
       </div>
+
+      {tradedAssets.length > 0 && (
+        <div className="tf-news-filter-pills">
+          <button className={`tf-news-pill ${selectedAsset === "all" ? "active" : ""}`} onClick={() => setSelectedAsset("all")}>
+            Todas
+          </button>
+          {tradedAssets.map((a) => (
+            <button key={a} className={`tf-news-pill ${selectedAsset === a ? "active" : ""}`} onClick={() => setSelectedAsset(a)}>
+              {a}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading && !items && (
         <div className="tf-card" style={{ textAlign: "center", padding: 40 }}>
@@ -1398,21 +1410,15 @@ function NewsView({ trades }) {
         </div>
       )}
 
-      {!loading && !error && highlighted.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <h4 className="tf-news-section-title"><Target size={14} /> Sobre os ativos que você opera</h4>
-          <div className="tf-news-grid">
-            {highlighted.slice(0, 6).map((item, i) => <NewsCard item={item} highlight key={i} />)}
-          </div>
-        </div>
-      )}
-
-      {!loading && !error && rest.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <h4 className="tf-news-section-title">Mais notícias do mercado</h4>
-          <div className="tf-news-grid">
-            {rest.map((item, i) => <NewsCard item={item} key={i} />)}
-          </div>
+      {!loading && !error && (
+        <div className="tf-news-grid" style={{ marginBottom: 26 }}>
+          {displayedItems.length > 0 ? (
+            displayedItems.map((item, i) => <NewsCard item={item} key={i} />)
+          ) : (
+            <p className="tf-muted" style={{ gridColumn: "1 / -1" }}>
+              Nenhuma notícia recente encontrada pra {selectedAsset}. Tenta outro ativo ou "Todas".
+            </p>
+          )}
         </div>
       )}
 
@@ -3116,6 +3122,15 @@ const APP_STYLES = `
 .tf-macro-label:hover{background:rgba(34,197,94,0.25); border-color:var(--lime);}
 .tf-macro-panel{min-height:440px;}
 .tf-macro-panel-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+
+.tf-news-filter-pills{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px;}
+.tf-news-pill{
+  background:var(--surface); border:1px solid var(--border); color:var(--muted);
+  font-size:12.5px; font-weight:600; padding:7px 15px; border-radius:20px; cursor:pointer;
+  transition:all .15s;
+}
+.tf-news-pill.active{background:var(--lime); color:#06280F; border-color:var(--lime);}
+.tf-news-pill:not(.active):hover{border-color:var(--lime); color:var(--text);}
 
 .tf-news-section-title{
   display:flex; align-items:center; gap:7px; font-size:13px; font-weight:700;
