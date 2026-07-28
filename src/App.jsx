@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -117,7 +117,7 @@ function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
     { id: "mindset", label: "Mente de Trader", icon: Brain },
-    { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck, badge: "Em breve" },
+    { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck },
     { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
@@ -1350,7 +1350,7 @@ function PropRiskTool() {
     <div className="tf-card">
       <div className="tf-card-head"><h3>Gerenciamento por mesa</h3></div>
       <p className="tf-muted" style={{ marginTop: -6, marginBottom: 18, fontSize: 12.5, maxWidth: 600 }}>
-        Escolhe sua mesa (só pra organização), informa o limite de perda diária <b>do seu plano específico</b> — esse valor está no contrato ou na plataforma da mesa — e a ferramenta calcula o tamanho de posição pra você nunca estourar a regra.
+        Escolhe sua mesa (é só pra organização), informa o limite de perda diária <b>do seu plano específico</b> e a ferramenta calcula o tamanho de posição pra você não estourar a regra. O valor da perda diária está no contrato ou na plataforma da sua mesa.
       </p>
 
       <div className="tf-subtabs" style={{ marginBottom: 16 }}>
@@ -1398,13 +1398,18 @@ function PropRiskTool() {
       )}
       {showResult && suggestedSize === 0 && (
         <p className="text-coral" style={{ fontSize: 12.5, marginTop: 14 }}>
-          Com esse stop, nem 1 contrato/lote cabe na fatia de risco escolhida. Diminui o stop, aumenta o % de risco por operação, ou revisa o setup.
+          Com esse stop, nem 1 contrato ou lote cabe na fatia de risco escolhida. Diminui o stop, aumenta o percentual de risco por operação, ou revisa o setup.
         </p>
       )}
 
-      <p className="tf-muted" style={{ fontSize: 11, marginTop: 18 }}>
-        Confirma sempre o limite de perda diária e o drawdown exatos do seu plano direto com a {firm} — esses valores variam por tamanho de conta e podem mudar. Isso é uma ferramenta de apoio, não substitui as regras oficiais da sua mesa.
-      </p>
+      <div className="tf-disclaimer-box">
+        <AlertTriangle size={16} />
+        <p>
+          Esta ferramenta apresenta um <b>gerenciamento de risco sugerido</b>, calculado só a partir dos valores que você mesmo informou.
+          O Tradefy não tem acesso às regras oficiais da sua mesa proprietária e não se responsabiliza por perdas, estouro de limite ou qualquer prejuízo decorrente do uso desses cálculos.
+          Confirma sempre o limite de perda diária e o drawdown exatos do seu plano diretamente com a {firm}, já que esses valores variam por tamanho de conta e podem mudar sem aviso.
+        </p>
+      </div>
     </div>
   );
 }
@@ -1431,30 +1436,22 @@ function PropDeskView({ isProPlan }) {
         <div className="tf-pending-icon" style={{ background: "rgba(34,197,94,0.14)", color: "var(--lime)" }}>
           <ShieldCheck size={22} />
         </div>
-        <span className="tf-propdesk-tag">Em desenvolvimento</span>
-        <h2 className="tf-onboarding-title" style={{ marginBottom: 10 }}>Essa novidade tá chegando</h2>
+        <span className="tf-propdesk-tag">Exclusivo Pro</span>
+        <h2 className="tf-onboarding-title" style={{ marginBottom: 10 }}>Nunca mais quebre mesa proprietária</h2>
         <p className="tf-muted" style={{ maxWidth: 480, margin: "0 auto 20px" }}>
-          Estamos construindo uma ferramenta de gerenciamento de risco feita sob medida pra quem opera com regras de mesa proprietária —
-          acompanhamento de limites diários, controle de drawdown e alertas pra te manter dentro das regras da sua mesa.
+          Uma ferramenta de gerenciamento de risco feita sob medida pra quem opera com regras de mesa proprietária, cobrindo as principais mesas de B3 e Forex.
         </p>
 
-        <div className="tf-propdesk-info">
-          <div className="tf-propdesk-info-item">
-            <span className="tf-muted" style={{ fontSize: 11.5 }}>Disponível a partir de</span>
-            <span className="tf-mono" style={{ fontWeight: 700 }}>01/08/2026</span>
-          </div>
-          <div className="tf-propdesk-info-item">
-            <span className="tf-muted" style={{ fontSize: 11.5 }}>Plano</span>
-            <span className="tf-mono" style={{ fontWeight: 700, color: "var(--lime)" }}>Exclusivo Pro</span>
-          </div>
-        </div>
+        <ul className="tf-propdesk-features">
+          <li><Check size={15} className="text-lime" /> Calcula o tamanho ideal de contratos ou lotes com base no limite de perda diária da sua mesa</li>
+          <li><Check size={15} className="text-lime" /> Mostra quantas perdas seguidas você aguenta antes de bater o limite do dia</li>
+          <li><Check size={15} className="text-lime" /> Cobre as principais mesas de B3 e Forex, com dados sempre editáveis pro seu plano específico</li>
+          <li><Check size={15} className="text-lime" /> Ajuda a evitar estourar o drawdown da sua mesa sem perceber</li>
+        </ul>
 
-        <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", display: "inline-block", marginTop: 8 }}>
-          Fazer upgrade para o Pro
+        <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <Rocket size={15} /> Fazer upgrade para o Pro
         </a>
-        <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 12 }}>
-          Faça upgrade agora e já entre garantido no lançamento.
-        </p>
       </div>
     </div>
   );
@@ -2839,6 +2836,13 @@ const APP_STYLES = `
 .tf-propdesk-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;background:var(--surface-2);color:var(--muted);padding:4px 12px;border-radius:20px;margin-bottom:14px;}
 .tf-propdesk-info{display:flex;justify-content:center;gap:32px;margin-top:8px;flex-wrap:wrap;}
 .tf-propdesk-info-item{display:flex;flex-direction:column;gap:4px;align-items:center;}
+
+.tf-propdesk-features{
+  list-style:none; margin:0 0 22px; padding:0; text-align:left;
+  display:flex; flex-direction:column; gap:11px; max-width:440px; margin-left:auto; margin-right:auto;
+}
+.tf-propdesk-features li{display:flex; gap:9px; align-items:flex-start; font-size:13px; color:var(--text); line-height:1.5;}
+.tf-propdesk-features li svg{flex-shrink:0; margin-top:2px;}
 .tf-nav-item:hover{background:var(--surface-2);color:var(--text);} .tf-nav-item.active{background:var(--blue-dim);color:#C9DAFF;}
 .tf-sidebar-footer{border-top:1px solid var(--border);padding-top:14px;}
 .tf-user-chip{display:flex;align-items:center;gap:8px;padding:6px 4px;background:none;border:none;cursor:pointer;width:100%;border-radius:7px;text-align:left;}
@@ -2891,6 +2895,15 @@ const APP_STYLES = `
   border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.5;color:var(--text);
 }
 .tf-mood-insight svg{color:var(--coral);flex-shrink:0;margin-top:1px;}
+
+.tf-disclaimer-box{
+  display:flex; gap:10px; align-items:flex-start; margin-top:22px;
+  background:var(--surface-2); border:1px solid var(--border);
+  border-radius:10px; padding:14px 16px;
+}
+.tf-disclaimer-box svg{color:var(--muted); flex-shrink:0; margin-top:2px;}
+.tf-disclaimer-box p{margin:0; font-size:11.5px; line-height:1.6; color:var(--muted);}
+.tf-disclaimer-box b{color:var(--text);}
 
 .tf-textarea{
   width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
