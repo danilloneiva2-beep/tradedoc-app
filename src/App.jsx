@@ -2386,8 +2386,41 @@ const MIND_TABS = [
   { id: "humor", label: "Humor x Resultado", icon: Brain },
 ];
 
-function MindsetView({ trades }) {
+function MindsetView({ trades, isProPlan }) {
   const [tab, setTab] = useState("humor");
+
+  if (!isProPlan) {
+    return (
+      <div className="tf-view">
+        <div className="tf-view-header">
+          <div><h1>Mente de Trader</h1><p className="tf-muted">Como seu estado emocional afeta seus resultados</p></div>
+        </div>
+
+        <div className="tf-card tf-propdesk-card">
+          <div className="tf-pending-icon" style={{ background: "rgba(255,92,114,0.14)", color: "var(--coral)" }}>
+            <Brain size={22} />
+          </div>
+          <span className="tf-propdesk-tag">Exclusivo Pro</span>
+          <h2 className="tf-onboarding-title" style={{ marginBottom: 10 }}>Descubra se o seu psicológico está sabotando seus resultados</h2>
+          <p className="tf-muted" style={{ maxWidth: 480, margin: "0 auto 20px" }}>
+            Marque como você estava se sentindo em cada operação e a ferramenta cruza isso com o seu resultado real, mostrando padrões que você não enxergaria sozinho.
+          </p>
+
+          <ul className="tf-propdesk-features">
+            <li><Check size={15} className="text-lime" /> Marca o humor de cada trade direto no formulário, em segundos</li>
+            <li><Check size={15} className="text-lime" /> Compara o resultado médio de cada estado emocional</li>
+            <li><Check size={15} className="text-lime" /> Mostra um alerta automático quando um padrão perigoso aparece</li>
+            <li><Check size={15} className="text-lime" /> Baseado 100% nos seus próprios dados, sem achismo</li>
+          </ul>
+
+          <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <Rocket size={15} /> Fazer upgrade para o Pro
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tf-view">
       <div className="tf-view-header"><div><h1>Mente de Trader</h1><p className="tf-muted">Como seu estado emocional afeta seus resultados</p></div></div>
@@ -2983,7 +3016,7 @@ export default function App() {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
-      case "mindset": return <MindsetView trades={trades} />;
+      case "mindset": return <MindsetView trades={trades} isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
       case "tools": return <ToolsView />;
