@@ -1200,20 +1200,28 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateC
           <div className="tf-card">
             <div className="tf-card-head"><h3>Aparência</h3></div>
             <p className="tf-muted" style={{ marginBottom: 14 }}>Escolha entre o tema escuro (padrão) ou claro.</p>
-            <button className="tf-theme-toggle" onClick={onToggleTheme}>
-              <span className={`tf-theme-option ${theme === "dark" ? "active" : ""}`}><Moon size={15} /> Escuro</span>
-              <span className={`tf-theme-option ${theme === "light" ? "active" : ""}`}><Sun size={15} /> Claro</span>
-            </button>
+            <div className="tf-pref-toggle-group">
+              <button className={`tf-pref-toggle-btn ${theme === "dark" ? "active" : ""}`} onClick={() => theme !== "dark" && onToggleTheme()}>
+                <Moon size={15} /> Escuro
+              </button>
+              <button className={`tf-pref-toggle-btn ${theme === "light" ? "active" : ""}`} onClick={() => theme !== "light" && onToggleTheme()}>
+                <Sun size={15} /> Claro
+              </button>
+            </div>
           </div>
           <div className="tf-card">
             <div className="tf-card-head"><h3>Moeda de exibição</h3></div>
             <p className="tf-muted" style={{ marginBottom: 14 }}>
               Escolha em qual moeda quer ver os valores em todo o app — saldo, resultados, calendário, tudo.
             </p>
-            <button className="tf-theme-toggle" onClick={() => onUpdateCurrency(currency === "BRL" ? "USD" : "BRL")}>
-              <span className={`tf-theme-option ${currency === "BRL" ? "active" : ""}`}>Real (R$)</span>
-              <span className={`tf-theme-option ${currency === "USD" ? "active" : ""}`}>Dólar (US$)</span>
-            </button>
+            <div className="tf-pref-toggle-group">
+              <button className={`tf-pref-toggle-btn ${currency === "BRL" ? "active" : ""}`} onClick={() => onUpdateCurrency("BRL")}>
+                Real (R$)
+              </button>
+              <button className={`tf-pref-toggle-btn ${currency === "USD" ? "active" : ""}`} onClick={() => onUpdateCurrency("USD")}>
+                Dólar (US$)
+              </button>
+            </div>
             {currency === "USD" && (
               <p className="tf-muted" style={{ fontSize: 11, marginTop: 12 }}>
                 Conversão feita com a cotação atual do dólar. Os valores continuam guardados em reais por trás — é só a forma de exibir que muda.
@@ -3281,9 +3289,15 @@ const APP_STYLES = `
 .tf-app.theme-light .tf-sidebar-backdrop { background: rgba(20,24,32,0.35); }
 .tf-app.theme-light .tf-auth-screen { background: radial-gradient(circle at 50% 0%, rgba(0,112,255,0.08), transparent 55%); }
 
-.tf-theme-toggle{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;width:100%;background:var(--surface-2);}
-.tf-theme-option{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 0;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;}
-.tf-theme-option.active{background:var(--blue);color:#fff;}
+.tf-pref-toggle-group{display:flex; gap:8px; width:100%;}
+.tf-pref-toggle-btn{
+  flex:1; display:flex; align-items:center; justify-content:center; gap:7px;
+  padding:10px 0; border-radius:10px; border:1px solid var(--border);
+  background:var(--surface-2); color:var(--muted); font-size:13px; font-weight:600; cursor:pointer;
+  transition:all .15s;
+}
+.tf-pref-toggle-btn.active{background:var(--lime); color:#06280F; border-color:var(--lime);}
+.tf-pref-toggle-btn:not(.active):hover{border-color:var(--lime); color:var(--text);}
 
 /* Mobile top bar (hidden on desktop) */
 .tf-mobile-topbar{display:none;}
