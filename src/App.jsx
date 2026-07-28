@@ -1261,17 +1261,62 @@ function PlansView({ currentPlan }) {
   );
 }
 
-function NewsView() {
-  const containerRef = useRef(null);
+const ASSET_NEWS_KEYWORDS = {
+  WIN: ["ibovespa", "bolsa brasileira", "bolsa de valores", "b3"],
+  IND: ["ibovespa", "bolsa brasileira", "b3"],
+  WDO: ["dólar", "câmbio"],
+  DOL: ["dólar", "câmbio"],
+  XAUUSD: ["ouro"],
+  GOLD: ["ouro"],
+  BTCUSD: ["bitcoin", "criptomoeda", "cripto"],
+  BTC: ["bitcoin", "criptomoeda", "cripto"],
+  EURUSD: ["euro"],
+  GBPUSD: ["libra esterlina"],
+  US100: ["nasdaq"],
+  US30: ["dow jones"],
+  SPX: ["s&p 500"],
+};
 
+function getNewsKeywordsForAsset(rawAsset) {
+  const asset = String(rawAsset || "").toUpperCase();
+  for (const [key, words] of Object.entries(ASSET_NEWS_KEYWORDS)) {
+    if (asset.includes(key)) return words;
+  }
+  return [];
+}
+
+function newsRelativeTime(pubDate) {
+  const date = new Date(pubDate);
+  if (isNaN(date.getTime())) return "";
+  const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (diffMin < 1) return "agora";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH}h`;
+  return `há ${Math.floor(diffH / 24)}d`;
+}
+
+function NewsCard({ item, highlight }) {
+  return (
+    <a href={item.link} target="_blank" rel="noopener noreferrer" className={`tf-news-card ${highlight ? "tf-news-card-highlight" : ""}`}>
+      <div className="tf-news-card-top">
+        <span className="tf-news-source">{item.source}</span>
+        <span className="tf-news-time">{newsRelativeTime(item.pubDate)}</span>
+      </div>
+      <h4>{item.title}</h4>
+      {item.description && <p>{item.description}</p>}
+    </a>
+  );
+}
+
+function EconomicCalendarWidget() {
+  const containerRef = useRef(null);
   useEffect(() => {
     if (!containerRef.current) return;
     containerRef.current.innerHTML = "";
-
     const widgetDiv = document.createElement("div");
     widgetDiv.className = "tradingview-widget-container__widget";
     containerRef.current.appendChild(widgetDiv);
-
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
     script.type = "text/javascript";
@@ -1286,14 +1331,94 @@ function NewsView() {
     });
     containerRef.current.appendChild(script);
   }, []);
+  return <div className="tradingview-widget-container" ref={containerRef} />;
+}
+
+function NewsView({ trades }) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke("news-feed");
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(data.error);
+      setItems(data.items || []);
+    } catch (err) {
+      console.error(err);
+      setError("Não consegui carregar as notícias agora. Tenta de novo em instantes.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const userKeywords = useMemo(() => {
+    const assets = [...new Set((trades || []).map((t) => t.asset))];
+    const kwSet = new Set();
+    assets.forEach((a) => getNewsKeywordsForAsset(a).forEach((k) => kwSet.add(k)));
+    return [...kwSet];
+  }, [trades]);
+
+  const { highlighted, rest } = useMemo(() => {
+    if (!items) return { highlighted: [], rest: [] };
+    if (userKeywords.length === 0) return { highlighted: [], rest: items };
+    const h = [], r = [];
+    items.forEach((item) => {
+      const text = `${item.title} ${item.description}`.toLowerCase();
+      if (userKeywords.some((k) => text.includes(k))) h.push(item);
+      else r.push(item);
+    });
+    return { highlighted: h, rest: r };
+  }, [items, userKeywords]);
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Notícias</h1><p className="tf-muted">Calendário econômico em tempo real</p></div>
+        <div><h1>Notícias</h1><p className="tf-muted">Últimas notícias de mercado e calendário econômico</p></div>
+        <button className="tf-btn-outline" onClick={load} disabled={loading}>
+          <RefreshCw size={15} className={loading ? "tf-spin" : ""} /> Atualizar
+        </button>
       </div>
+
+      {loading && !items && (
+        <div className="tf-card" style={{ textAlign: "center", padding: 40 }}>
+          <p className="tf-muted">Carregando notícias...</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="tf-card" style={{ borderColor: "var(--coral)", display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
+          <AlertCircle size={18} color="var(--coral)" />
+          <p style={{ margin: 0, fontSize: 13.5 }}>{error}</p>
+        </div>
+      )}
+
+      {!loading && !error && highlighted.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <h4 className="tf-news-section-title"><Target size={14} /> Sobre os ativos que você opera</h4>
+          <div className="tf-news-grid">
+            {highlighted.slice(0, 6).map((item, i) => <NewsCard item={item} highlight key={i} />)}
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && rest.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <h4 className="tf-news-section-title">Mais notícias do mercado</h4>
+          <div className="tf-news-grid">
+            {rest.map((item, i) => <NewsCard item={item} key={i} />)}
+          </div>
+        </div>
+      )}
+
       <div className="tf-card" style={{ padding: 0, overflow: "hidden" }}>
-        <div className="tradingview-widget-container" ref={containerRef} />
+        <div className="tf-news-block-title">Calendário econômico</div>
+        <EconomicCalendarWidget />
       </div>
     </div>
   );
@@ -2719,7 +2844,7 @@ export default function App() {
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "mindset": return <MindsetView trades={trades} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
-      case "news": return <NewsView />;
+      case "news": return <NewsView trades={trades} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} />;
@@ -2992,6 +3117,25 @@ const APP_STYLES = `
 .tf-macro-panel{min-height:440px;}
 .tf-macro-panel-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
 
+.tf-news-section-title{
+  display:flex; align-items:center; gap:7px; font-size:13px; font-weight:700;
+  color:var(--text); margin-bottom:14px; text-transform:uppercase; letter-spacing:.02em;
+}
+.tf-news-section-title svg{color:var(--lime);}
+.tf-news-grid{display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;}
+.tf-news-card{
+  display:block; background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:16px 18px; text-decoration:none; color:inherit; transition:border-color .15s, transform .15s;
+}
+.tf-news-card:hover{border-color:rgba(34,197,94,.4); transform:translateY(-2px);}
+.tf-news-card-highlight{border-color:rgba(34,197,94,.35); background:linear-gradient(160deg, var(--surface) 0%, rgba(34,197,94,.06) 140%);}
+.tf-news-card-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:9px;}
+.tf-news-source{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--lime);}
+.tf-news-time{font-size:11px; color:var(--muted);}
+.tf-news-card h4{font-size:13.5px; font-weight:600; line-height:1.4; margin-bottom:6px; color:var(--text);}
+.tf-news-card p{font-size:12px; color:var(--muted); line-height:1.5;}
+.tf-news-block-title{font-size:13px; font-weight:700; color:var(--text); padding:16px 18px 12px; border-bottom:1px solid var(--border);}
+
 .tf-macro-indicators{display:flex;flex-direction:column;gap:12px;}
 .tf-macro-indicator-row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
@@ -3151,6 +3295,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-form-inline-3{ grid-template-columns:1fr; }
   .tf-riskmgr-grid{ grid-template-columns:1fr 1fr; }
   .tf-macro-layout{ grid-template-columns:1fr; }
+  .tf-news-grid{ grid-template-columns:1fr; }
   .tf-macro-globe{ height:340px; }
 
   .tf-view-header h1{ font-size:19px; }
