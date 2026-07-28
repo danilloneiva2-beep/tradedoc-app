@@ -1262,15 +1262,40 @@ function PlansView({ currentPlan }) {
 }
 
 function NewsView() {
-  const containerRef = useRef(null);
+  const calendarRef = useRef(null);
+  const newsRef = useRef(null);
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    containerRef.current.innerHTML = "";
+    if (!newsRef.current) return;
+    newsRef.current.innerHTML = "";
 
     const widgetDiv = document.createElement("div");
     widgetDiv.className = "tradingview-widget-container__widget";
-    containerRef.current.appendChild(widgetDiv);
+    newsRef.current.appendChild(widgetDiv);
+
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-timeline.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      feedMode: "all_symbols",
+      colorTheme: "dark",
+      isTransparent: true,
+      displayMode: "regular",
+      width: "100%",
+      height: "480",
+      locale: "br",
+    });
+    newsRef.current.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    if (!calendarRef.current) return;
+    calendarRef.current.innerHTML = "";
+
+    const widgetDiv = document.createElement("div");
+    widgetDiv.className = "tradingview-widget-container__widget";
+    calendarRef.current.appendChild(widgetDiv);
 
     const script = document.createElement("script");
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-events.js";
@@ -1284,16 +1309,23 @@ function NewsView() {
       locale: "br",
       importanceFilter: "-1,0,1",
     });
-    containerRef.current.appendChild(script);
+    calendarRef.current.appendChild(script);
   }, []);
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Notícias</h1><p className="tf-muted">Calendário econômico em tempo real</p></div>
+        <div><h1>Notícias</h1><p className="tf-muted">Principais notícias e calendário econômico em tempo real</p></div>
       </div>
+
+      <div className="tf-card" style={{ padding: 0, overflow: "hidden", marginBottom: 20 }}>
+        <div className="tf-news-block-title">Principais notícias do dia</div>
+        <div className="tradingview-widget-container" ref={newsRef} />
+      </div>
+
       <div className="tf-card" style={{ padding: 0, overflow: "hidden" }}>
-        <div className="tradingview-widget-container" ref={containerRef} />
+        <div className="tf-news-block-title">Calendário econômico</div>
+        <div className="tradingview-widget-container" ref={calendarRef} />
       </div>
     </div>
   );
@@ -2492,6 +2524,43 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
 
 /* --------------------------------- App ----------------------------------- */
 
+function TickerTapeBar() {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.innerHTML = "";
+
+    const widgetDiv = document.createElement("div");
+    widgetDiv.className = "tradingview-widget-container__widget";
+    ref.current.appendChild(widgetDiv);
+
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      symbols: [
+        { proName: "BMFBOVESPA:IBOV", title: "Ibovespa" },
+        { proName: "FX_IDC:USDBRL", title: "Dólar" },
+        { proName: "FX:EURUSD", title: "EUR/USD" },
+        { proName: "FX:GBPUSD", title: "GBP/USD" },
+        { proName: "TVC:GOLD", title: "Ouro" },
+        { proName: "BITSTAMP:BTCUSD", title: "Bitcoin" },
+        { proName: "NASDAQ:NDX", title: "Nasdaq 100" },
+      ],
+      showSymbolLogo: true,
+      isTransparent: true,
+      displayMode: "adaptive",
+      colorTheme: "dark",
+      locale: "br",
+    });
+    ref.current.appendChild(script);
+  }, []);
+
+  return <div className="tf-ticker-tape-bar tradingview-widget-container" ref={ref} />;
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [recoveryMode, setRecoveryMode] = useState(false);
@@ -2728,8 +2797,10 @@ export default function App() {
   })();
 
   return (
-    <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
+    <div className="tf-app-outer">
       <style>{APP_STYLES}</style>
+      {session && profile && hasActiveAccess && !recoveryMode && <TickerTapeBar />}
+      <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
       {recoveryMode ? (
         <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />
       ) : (
@@ -2768,6 +2839,7 @@ export default function App() {
       )}
         </>
       )}
+      </div>
       <a
         href="https://wa.me/5511993283482?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20Tradefy."
         target="_blank"
@@ -2783,7 +2855,9 @@ export default function App() {
 
 const APP_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-.tf-app { --bg:#0F172A; --surface:#16202E; --surface-2:#1C2836; --border:#2A3646; --text:#F5F7FA; --muted:#94A3B8; --blue:#2563EB; --blue-dim:#16294A; --lime:#22C55E; --coral:#FF5C72; display:flex; min-height:100vh; min-height:100dvh; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
+.tf-app-outer{ display:flex; flex-direction:column; min-height:100vh; min-height:100dvh; background:#0F172A; }
+.tf-ticker-tape-bar{ flex-shrink:0; border-bottom:1px solid #2A3646; background:#0B1119; }
+.tf-app { --bg:#0F172A; --surface:#16202E; --surface-2:#1C2836; --border:#2A3646; --text:#F5F7FA; --muted:#94A3B8; --blue:#2563EB; --blue-dim:#16294A; --lime:#22C55E; --coral:#FF5C72; display:flex; flex:1; min-height:0; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
 .tf-app * { box-sizing:border-box; }
 .text-lime{color:var(--lime);} .text-coral{color:var(--coral);} .text-blue{color:var(--blue);}
 .tf-mono{font-family:'JetBrains Mono',monospace;} .tf-muted{color:var(--muted);font-size:13px;} .tf-empty{color:var(--muted);font-size:13px;padding:10px 0;}
@@ -2991,6 +3065,11 @@ const APP_STYLES = `
 .tf-macro-label:hover{background:rgba(34,197,94,0.25); border-color:var(--lime);}
 .tf-macro-panel{min-height:440px;}
 .tf-macro-panel-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
+
+.tf-news-block-title{
+  font-size:13px; font-weight:700; color:var(--text); padding:16px 18px 12px;
+  border-bottom:1px solid var(--border);
+}
 .tf-macro-indicators{display:flex;flex-direction:column;gap:12px;}
 .tf-macro-indicator-row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;}
 .tf-form-row{display:flex;flex-direction:column;gap:5px;} .tf-form-row label{font-size:12px;color:var(--muted);font-weight:500;}
@@ -3102,7 +3181,7 @@ const APP_STYLES = `
 html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 
 @media (max-width: 860px) {
-  .tf-app { flex-direction: column; min-height: 100vh; }
+  .tf-app { flex-direction: column; }
 
   .tf-mobile-topbar{
     display:flex; align-items:center; gap:12px;
