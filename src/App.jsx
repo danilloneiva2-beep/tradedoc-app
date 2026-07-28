@@ -18,9 +18,17 @@ import { supabase } from "./supabaseClient";
    Tradefy — app real conectado ao Supabase (auth + banco de dados)
 ----------------------------------------------------------------*/
 
+let CURRENCY_MODE = "BRL";
+let USD_BRL_RATE = 1;
+
 function fmtBRL(v) {
-  const sign = v < 0 ? "-" : "+";
-  return `${sign}R$ ${Math.abs(v).toLocaleString("pt-BR")}`;
+  const n = Number(v) || 0;
+  const sign = n < 0 ? "-" : "+";
+  if (CURRENCY_MODE === "USD" && USD_BRL_RATE > 0) {
+    const usd = Math.abs(n) / USD_BRL_RATE;
+    return `${sign}US$ ${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return `${sign}R$ ${Math.abs(n).toLocaleString("pt-BR")}`;
 }
 
 const BASE_CAPITAL = 12000;
@@ -1139,7 +1147,7 @@ function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount
   );
 }
 
-function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setActive, onLogout, theme, onToggleTheme }) {
+function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateCurrency, currentPlan, setActive, onLogout, theme, onToggleTheme }) {
   const [name, setName] = useState(userName);
   const [savedMsg, setSavedMsg] = useState(false);
   const [newPwd, setNewPwd] = useState("");
@@ -1196,6 +1204,21 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currentPlan, setAct
               <span className={`tf-theme-option ${theme === "dark" ? "active" : ""}`}><Moon size={15} /> Escuro</span>
               <span className={`tf-theme-option ${theme === "light" ? "active" : ""}`}><Sun size={15} /> Claro</span>
             </button>
+          </div>
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Moeda de exibição</h3></div>
+            <p className="tf-muted" style={{ marginBottom: 14 }}>
+              Escolha em qual moeda quer ver os valores em todo o app — saldo, resultados, calendário, tudo.
+            </p>
+            <button className="tf-theme-toggle" onClick={() => onUpdateCurrency(currency === "BRL" ? "USD" : "BRL")}>
+              <span className={`tf-theme-option ${currency === "BRL" ? "active" : ""}`}>Real (R$)</span>
+              <span className={`tf-theme-option ${currency === "USD" ? "active" : ""}`}>Dólar (US$)</span>
+            </button>
+            {currency === "USD" && (
+              <p className="tf-muted" style={{ fontSize: 11, marginTop: 12 }}>
+                Conversão feita com a cotação atual do dólar. Os valores continuam guardados em reais por trás — é só a forma de exibir que muda.
+              </p>
+            )}
           </div>
           <div className="tf-card">
             <div className="tf-card-head"><h3>Assinatura</h3></div>
@@ -2629,6 +2652,17 @@ export default function App() {
   const [loadingSession, setLoadingSession] = useState(true);
   const [loadingUserData, setLoadingUserData] = useState(true);
   const [profile, setProfile] = useState(null);
+  const [usdRate, setUsdRate] = useState(null);
+
+  useEffect(() => {
+    fetch("https://economia.awesomeapi.com.br/last/USD-BRL")
+      .then((res) => res.json())
+      .then((data) => {
+        const rate = parseFloat(data?.USDBRL?.bid);
+        if (rate > 0) setUsdRate(rate);
+      })
+      .catch((err) => console.error("Não consegui buscar a cotação do dólar:", err));
+  }, []);
   const [accounts, setAccounts] = useState([]);
   const [trades, setTrades] = useState([]);
   const [subscription, setSubscription] = useState(null);
@@ -2825,6 +2859,12 @@ export default function App() {
     await loadUserData();
   };
 
+  const handleUpdateCurrency = async (currency) => {
+    const { error } = await supabase.from("profiles").update({ currency }).eq("id", session.user.id);
+    if (error) return reportError(error, "salvar a moeda de exibição");
+    await loadUserData();
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setActive("dashboard");
@@ -2852,11 +2892,14 @@ export default function App() {
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
       case "tools": return <ToolsView />;
-      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
+      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currency={profile?.currency || "BRL"} onUpdateCurrency={handleUpdateCurrency} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} />;
       default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
     }
   })();
+
+  CURRENCY_MODE = profile?.currency || "BRL";
+  USD_BRL_RATE = usdRate || 1;
 
   return (
     <div className={`tf-app ${theme === "light" ? "theme-light" : ""}`}>
