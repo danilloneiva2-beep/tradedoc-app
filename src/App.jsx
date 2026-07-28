@@ -397,6 +397,28 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
   );
 }
 
+async function uploadTradeScreenshot(file) {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData?.user?.id;
+  if (!userId) throw new Error("Sessão expirada, atualiza a página e tenta de novo.");
+  const ext = file.name.split(".").pop();
+  const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from("trade-screenshots").upload(path, file, { upsert: false });
+  if (error) throw error;
+  return path;
+}
+
+async function getTradeScreenshotUrl(path) {
+  const { data, error } = await supabase.storage.from("trade-screenshots").createSignedUrl(path, 3600);
+  if (error) { console.error(error); return null; }
+  return data?.signedUrl || null;
+}
+
+async function deleteTradeScreenshot(path) {
+  if (!path) return;
+  await supabase.storage.from("trade-screenshots").remove([path]);
+}
+
 function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) {
   const [asset, setAsset] = useState(editTrade?.asset || "WINFUT");
   const [side, setSide] = useState(editTrade?.side || "Compra");
@@ -404,7 +426,26 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
   const [outcome, setOutcome] = useState(editTrade ? (Number(editTrade.pnl) >= 0 ? "win" : "loss") : "win");
   const [date, setDate] = useState(editTrade?.trade_date || initialDate || new Date().toISOString().slice(0, 10));
   const [accountId, setAccountId] = useState(editTrade?.account_id || accounts[0]?.id || "");
+  const [notes, setNotes] = useState(editTrade?.notes || "");
+  const [screenshotFile, setScreenshotFile] = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState(null);
+  const [existingScreenshotPath, setExistingScreenshotPath] = useState(editTrade?.screenshot_path || null);
+  const [removeExisting, setRemoveExisting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Imagem muito grande — o limite é 5MB.");
+      return;
+    }
+    setUploadError("");
+    setScreenshotFile(file);
+    setScreenshotPreview(URL.createObjectURL(file));
+    setRemoveExisting(false);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -412,7 +453,24 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
     if (val === 0 || !accountId) return;
     const pnl = outcome === "win" ? val : -val;
     setSaving(true);
-    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId });
+
+    let screenshot_path = removeExisting ? null : existingScreenshotPath;
+    if (screenshotFile) {
+      try {
+        screenshot_path = await uploadTradeScreenshot(screenshotFile);
+        if (existingScreenshotPath && existingScreenshotPath !== screenshot_path) {
+          await deleteTradeScreenshot(existingScreenshotPath);
+        }
+      } catch (err) {
+        setUploadError(err.message || "Não consegui subir a imagem.");
+        setSaving(false);
+        return;
+      }
+    } else if (removeExisting && existingScreenshotPath) {
+      await deleteTradeScreenshot(existingScreenshotPath);
+    }
+
+    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId, notes: notes || null, screenshot_path });
     setSaving(false);
     onClose();
   };
@@ -461,6 +519,40 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
+
+          <div className="tf-form-row">
+            <label>Notas (opcional)</label>
+            <textarea
+              className="tf-textarea"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="O que você pensou nessa operação? Setup, erro, aprendizado..."
+              rows={3}
+            />
+          </div>
+
+          <div className="tf-form-row">
+            <label>Print do gráfico (opcional)</label>
+            {(screenshotPreview || (existingScreenshotPath && !removeExisting)) ? (
+              <div className="tf-screenshot-preview-wrap">
+                {screenshotPreview ? (
+                  <img src={screenshotPreview} alt="Prévia" className="tf-screenshot-preview" />
+                ) : (
+                  <div className="tf-screenshot-existing"><FileSpreadsheet size={16} /> Imagem já anexada</div>
+                )}
+                <button type="button" className="tf-btn-outline" onClick={() => { setScreenshotFile(null); setScreenshotPreview(null); setRemoveExisting(true); }}>
+                  Remover imagem
+                </button>
+              </div>
+            ) : (
+              <label htmlFor="tf-trade-screenshot" className="tf-btn-outline" style={{ cursor: "pointer", display: "inline-flex" }}>
+                <Upload size={15} /> Anexar imagem
+              </label>
+            )}
+            <input type="file" id="tf-trade-screenshot" accept="image/*" onChange={handleFileChange} style={{ display: "none" }} />
+            {uploadError && <p className="text-coral" style={{ fontSize: 12, margin: "4px 0 0" }}>{uploadError}</p>}
+          </div>
+
           <button type="submit" className="tf-btn-primary tf-form-submit" disabled={saving}>
             <Plus size={15} /> {saving ? "Salvando..." : editTrade ? "Salvar alterações" : "Salvar trade"}
           </button>
@@ -623,7 +715,42 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
   );
 }
 
+function TradeRowExpanded({ trade }) {
+  const [signedUrl, setSignedUrl] = useState(null);
+  const [loadingImg, setLoadingImg] = useState(!!trade.screenshot_path);
+
+  useEffect(() => {
+    let active = true;
+    if (trade.screenshot_path) {
+      getTradeScreenshotUrl(trade.screenshot_path).then((url) => {
+        if (active) { setSignedUrl(url); setLoadingImg(false); }
+      });
+    }
+    return () => { active = false; };
+  }, [trade.screenshot_path]);
+
+  if (!trade.notes && !trade.screenshot_path) return null;
+
+  return (
+    <div className="tf-trade-expanded">
+      {trade.notes && <p className="tf-trade-notes">{trade.notes}</p>}
+      {trade.screenshot_path && (
+        loadingImg ? (
+          <p className="tf-muted" style={{ fontSize: 11.5 }}>Carregando imagem...</p>
+        ) : signedUrl ? (
+          <a href={signedUrl} target="_blank" rel="noopener noreferrer">
+            <img src={signedUrl} alt="Print do trade" className="tf-trade-screenshot-thumb" />
+          </a>
+        ) : (
+          <p className="tf-muted" style={{ fontSize: 11.5 }}>Não consegui carregar a imagem.</p>
+        )
+      )}
+    </div>
+  );
+}
+
 function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade, onDeleteTrade }) {
+  const [expandedId, setExpandedId] = useState(null);
   const total = dayTrades.reduce((s, t) => s + Number(t.pnl), 0);
   return (
     <div className="tf-modal-overlay" onClick={onClose}>
@@ -639,16 +766,28 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade
               <span className={`tf-mono ${total >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(total)}</span>
             </div>
             <div className="tf-trade-list" style={{ marginBottom: 14 }}>
-              {dayTrades.map((t) => (
-                <div className="tf-trade-row tf-trade-row-editable" key={t.id}>
-                  <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
-                  <span className="tf-asset">{t.asset}</span>
-                  <span className="tf-muted tf-trade-side">{t.side}</span>
-                  <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
-                  <button type="button" className="tf-row-action" onClick={() => onEditTrade(t)} title="Editar"><Pencil size={13} /></button>
-                  <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => onDeleteTrade(t)} title="Apagar"><Trash2 size={13} /></button>
-                </div>
-              ))}
+              {dayTrades.map((t) => {
+                const hasExtra = t.notes || t.screenshot_path;
+                const isOpen = expandedId === t.id;
+                return (
+                  <div key={t.id}>
+                    <div
+                      className="tf-trade-row tf-trade-row-editable"
+                      style={{ cursor: hasExtra ? "pointer" : "default" }}
+                      onClick={() => hasExtra && setExpandedId(isOpen ? null : t.id)}
+                    >
+                      <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
+                      <span className="tf-asset">{t.asset}</span>
+                      <span className="tf-muted tf-trade-side">{t.side}</span>
+                      {hasExtra && <FileSpreadsheet size={12} className="tf-muted" style={{ flexShrink: 0 }} />}
+                      <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                      <button type="button" className="tf-row-action" onClick={(e) => { e.stopPropagation(); onEditTrade(t); }} title="Editar"><Pencil size={13} /></button>
+                      <button type="button" className="tf-row-action tf-row-action-danger" onClick={(e) => { e.stopPropagation(); onDeleteTrade(t); }} title="Apagar"><Trash2 size={13} /></button>
+                    </div>
+                    {isOpen && <TradeRowExpanded trade={t} />}
+                  </div>
+                );
+              })}
             </div>
           </>
         ) : (
@@ -2303,6 +2442,7 @@ export default function App() {
   const handleDeleteTrade = async (trade) => {
     const { error: delError } = await supabase.from("trades").delete().eq("id", trade.id);
     if (delError) return reportError(delError, "apagar o trade");
+    if (trade.screenshot_path) await deleteTradeScreenshot(trade.screenshot_path);
     const account = accounts.find((a) => a.id === trade.account_id);
     if (account) {
       const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) - Number(trade.pnl) }).eq("id", account.id);
@@ -2515,6 +2655,17 @@ const APP_STYLES = `
 .tf-table-row:last-child{border-bottom:none;} .tf-table-head{color:var(--muted);font-size:11.5px;text-transform:uppercase;}
 .tf-asset{font-weight:600;}
 .tf-trade-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+
+.tf-textarea{
+  width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
+  padding:10px 12px; color:var(--text); font-size:13px; font-family:inherit; resize:vertical;
+}
+.tf-screenshot-preview-wrap{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+.tf-screenshot-preview{width:70px; height:70px; object-fit:cover; border-radius:8px; border:1px solid var(--border);}
+.tf-screenshot-existing{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);}
+.tf-trade-expanded{padding:10px 0 12px 20px; margin-top:-4px; border-bottom:1px solid var(--border);}
+.tf-trade-notes{font-size:12.5px; color:var(--muted); margin:0 0 10px; white-space:pre-wrap; line-height:1.5;}
+.tf-trade-screenshot-thumb{max-width:100%; max-height:220px; border-radius:8px; border:1px solid var(--border); display:block;}
 .tf-trade-row:last-child{border-bottom:none;} .tf-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 .dot-lime{background:var(--lime);} .dot-coral{background:var(--coral);} .tf-trade-date{width:42px;} .tf-trade-side{flex:1;color:var(--muted);} .tf-trade-pnl{min-width:70px;text-align:right;}
 .tf-trade-row-editable .tf-trade-pnl{min-width:auto;}
