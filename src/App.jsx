@@ -2602,11 +2602,8 @@ export default function App() {
     const userId = session.user.id;
     const { error: insertError } = await supabase.from("trades").insert({ ...trade, user_id: userId });
     if (insertError) return reportError(insertError, "salvar o trade");
-    const account = accounts.find((a) => a.id === trade.account_id);
-    if (account) {
-      const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) + Number(trade.pnl) }).eq("id", account.id);
-      if (updError) return reportError(updError, "atualizar o saldo da conta");
-    }
+    const { error: updError } = await supabase.rpc("increment_balance", { p_account_id: trade.account_id, p_amount: Number(trade.pnl) });
+    if (updError) return reportError(updError, "atualizar o saldo da conta");
     await loadUserData();
   };
 
@@ -2621,11 +2618,8 @@ export default function App() {
       totalByAccount[t.account_id] = (totalByAccount[t.account_id] || 0) + Number(t.pnl);
     });
     for (const [accId, sum] of Object.entries(totalByAccount)) {
-      const account = accounts.find((a) => a.id === accId);
-      if (account) {
-        const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) + sum }).eq("id", accId);
-        if (updError) return reportError(updError, "atualizar o saldo depois da importação");
-      }
+      const { error: updError } = await supabase.rpc("increment_balance", { p_account_id: accId, p_amount: sum });
+      if (updError) return reportError(updError, "atualizar o saldo depois da importação");
     }
     await loadUserData();
   };
@@ -2638,22 +2632,13 @@ export default function App() {
     const newPnl = Number(updated.pnl);
 
     if (original.account_id === updated.account_id) {
-      const account = accounts.find((a) => a.id === updated.account_id);
-      if (account) {
-        const { error } = await supabase.from("accounts").update({ balance: Number(account.balance) - oldPnl + newPnl }).eq("id", account.id);
-        if (error) return reportError(error, "atualizar o saldo da conta");
-      }
+      const { error } = await supabase.rpc("increment_balance", { p_account_id: updated.account_id, p_amount: newPnl - oldPnl });
+      if (error) return reportError(error, "atualizar o saldo da conta");
     } else {
-      const oldAccount = accounts.find((a) => a.id === original.account_id);
-      const newAccount = accounts.find((a) => a.id === updated.account_id);
-      if (oldAccount) {
-        const { error } = await supabase.from("accounts").update({ balance: Number(oldAccount.balance) - oldPnl }).eq("id", oldAccount.id);
-        if (error) return reportError(error, "atualizar o saldo da conta antiga");
-      }
-      if (newAccount) {
-        const { error } = await supabase.from("accounts").update({ balance: Number(newAccount.balance) + newPnl }).eq("id", newAccount.id);
-        if (error) return reportError(error, "atualizar o saldo da nova conta");
-      }
+      const { error: errOld } = await supabase.rpc("increment_balance", { p_account_id: original.account_id, p_amount: -oldPnl });
+      if (errOld) return reportError(errOld, "atualizar o saldo da conta antiga");
+      const { error: errNew } = await supabase.rpc("increment_balance", { p_account_id: updated.account_id, p_amount: newPnl });
+      if (errNew) return reportError(errNew, "atualizar o saldo da nova conta");
     }
     await loadUserData();
   };
@@ -2662,11 +2647,8 @@ export default function App() {
     const { error: delError } = await supabase.from("trades").delete().eq("id", trade.id);
     if (delError) return reportError(delError, "apagar o trade");
     if (trade.screenshot_path) await deleteTradeScreenshot(trade.screenshot_path);
-    const account = accounts.find((a) => a.id === trade.account_id);
-    if (account) {
-      const { error: updError } = await supabase.from("accounts").update({ balance: Number(account.balance) - Number(trade.pnl) }).eq("id", account.id);
-      if (updError) return reportError(updError, "atualizar o saldo depois de apagar o trade");
-    }
+    const { error: updError } = await supabase.rpc("increment_balance", { p_account_id: trade.account_id, p_amount: -Number(trade.pnl) });
+    if (updError) return reportError(updError, "atualizar o saldo depois de apagar o trade");
     await loadUserData();
   };
 
