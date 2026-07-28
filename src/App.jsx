@@ -1299,7 +1299,128 @@ function NewsView() {
   );
 }
 
+const PROP_FIRMS_B3 = [
+  "LVL Trading", "Axia Investing", "Euroinvest", "Grupo MIDE", "Atom Educacional",
+  "X Prop Trading", "Dayna Capital", "Flod Trading", "Carbon Investing", "Outra mesa de B3",
+];
+const PROP_FIRMS_FOREX = [
+  "FTMO", "FundedNext", "The5%ers", "E8 Funding", "Funded Trading Plus",
+  "The Funded Trader", "DNA Funded", "Atmos Funded", "FundingPips", "Outra mesa de Forex",
+];
+
+function PropRiskTool() {
+  const [market, setMarket] = useState("b3");
+  const [firm, setFirm] = useState(PROP_FIRMS_B3[0]);
+  const [dailyLimit, setDailyLimit] = useState("");
+  const [riskPct, setRiskPct] = useState("25");
+  const [assetIdx, setAssetIdx] = useState(0);
+  const [pointValue, setPointValue] = useState(ASSET_PRESETS[0].pointValue);
+  const [stopPoints, setStopPoints] = useState("");
+
+  const firmList = market === "b3" ? PROP_FIRMS_B3 : PROP_FIRMS_FOREX;
+  const assetOptions = ASSET_PRESETS.filter((a) => a.group === (market === "b3" ? "B3" : "Forex"));
+
+  const handleMarketChange = (m) => {
+    setMarket(m);
+    setFirm(m === "b3" ? PROP_FIRMS_B3[0] : PROP_FIRMS_FOREX[0]);
+    const firstIdx = ASSET_PRESETS.findIndex((a) => a.group === (m === "b3" ? "B3" : "Forex"));
+    setAssetIdx(firstIdx);
+    setPointValue(ASSET_PRESETS[firstIdx].pointValue);
+  };
+
+  const handleAssetChange = (idx) => {
+    setAssetIdx(idx);
+    setPointValue(ASSET_PRESETS[idx].pointValue);
+  };
+
+  const asset = ASSET_PRESETS[assetIdx] || ASSET_PRESETS[0];
+  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const daily = num(dailyLimit);
+  const risk = num(riskPct);
+  const stop = num(stopPoints);
+  const pv = num(pointValue);
+
+  const riskPerTrade = daily * (risk / 100);
+  const lossPerUnit = stop * pv;
+  const suggestedSize = lossPerUnit > 0 ? Math.floor(riskPerTrade / lossPerUnit) : 0;
+  const tradesUntilLimit = riskPerTrade > 0 ? Math.floor(daily / riskPerTrade) : 0;
+  const showResult = daily > 0 && stop > 0 && pv > 0;
+
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Gerenciamento por mesa</h3></div>
+      <p className="tf-muted" style={{ marginTop: -6, marginBottom: 18, fontSize: 12.5, maxWidth: 600 }}>
+        Escolhe sua mesa (só pra organização), informa o limite de perda diária <b>do seu plano específico</b> — esse valor está no contrato ou na plataforma da mesa — e a ferramenta calcula o tamanho de posição pra você nunca estourar a regra.
+      </p>
+
+      <div className="tf-subtabs" style={{ marginBottom: 16 }}>
+        <button className={`tf-subtab ${market === "b3" ? "active" : ""}`} onClick={() => handleMarketChange("b3")}>B3</button>
+        <button className={`tf-subtab ${market === "forex" ? "active" : ""}`} onClick={() => handleMarketChange("forex")}>Forex</button>
+      </div>
+
+      <div className="tf-riskmgr-grid">
+        <div className="tf-form-row">
+          <label>Mesa proprietária</label>
+          <select value={firm} onChange={(e) => setFirm(e.target.value)}>
+            {firmList.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        </div>
+        <div className="tf-form-row">
+          <label>Perda máxima diária do seu plano ({asset.currency})</label>
+          <input value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} placeholder="ex: 1000" inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>% do limite diário a arriscar por operação</label>
+          <input value={riskPct} onChange={(e) => setRiskPct(e.target.value)} placeholder="25" inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Ativo</label>
+          <select value={assetIdx} onChange={(e) => handleAssetChange(Number(e.target.value))}>
+            {ASSET_PRESETS.map((a, i) => a.group === (market === "b3" ? "B3" : "Forex") && <option key={i} value={i}>{a.label}</option>)}
+          </select>
+        </div>
+        <div className="tf-form-row">
+          <label>Valor por {asset.unit} ({asset.currency})</label>
+          <input value={pointValue} onChange={(e) => setPointValue(e.target.value)} inputMode="decimal" />
+        </div>
+        <div className="tf-form-row">
+          <label>Distância do stop ({asset.unit}s)</label>
+          <input value={stopPoints} onChange={(e) => setStopPoints(e.target.value)} placeholder="50" inputMode="decimal" />
+        </div>
+      </div>
+
+      {showResult && (
+        <div className="tf-stats-grid" style={{ marginTop: 20 }}>
+          <StatCard icon={ShieldCheck} label="Risco por operação" value={`${asset.currency} ${riskPerTrade.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+          <StatCard icon={Hash} label={market === "b3" ? "Contratos sugeridos" : "Lotes sugeridos"} value={suggestedSize} tone={suggestedSize > 0 ? "up" : "down"} />
+          <StatCard icon={AlertTriangle} label="Perdas seguidas até o limite do dia" value={tradesUntilLimit} tone="neutral" />
+        </div>
+      )}
+      {showResult && suggestedSize === 0 && (
+        <p className="text-coral" style={{ fontSize: 12.5, marginTop: 14 }}>
+          Com esse stop, nem 1 contrato/lote cabe na fatia de risco escolhida. Diminui o stop, aumenta o % de risco por operação, ou revisa o setup.
+        </p>
+      )}
+
+      <p className="tf-muted" style={{ fontSize: 11, marginTop: 18 }}>
+        Confirma sempre o limite de perda diária e o drawdown exatos do seu plano direto com a {firm} — esses valores variam por tamanho de conta e podem mudar. Isso é uma ferramenta de apoio, não substitui as regras oficiais da sua mesa.
+      </p>
+    </div>
+  );
+}
+
 function PropDeskView({ isProPlan }) {
+  if (isProPlan) {
+    return (
+      <div className="tf-view">
+        <div className="tf-view-header">
+          <div><h1>Gerenciamento Mesa Prop</h1><p className="tf-muted">Gestão de risco pensada pra quem opera em mesa proprietária</p></div>
+        </div>
+        <PropRiskTool />
+      </div>
+    );
+  }
+
   return (
     <div className="tf-view">
       <div className="tf-view-header">
@@ -1328,20 +1449,12 @@ function PropDeskView({ isProPlan }) {
           </div>
         </div>
 
-        {isProPlan ? (
-          <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 18 }}>
-            Seu plano Pro já vai te dar acesso automático assim que a ferramenta for lançada — não precisa fazer nada.
-          </p>
-        ) : (
-          <>
-            <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", display: "inline-block", marginTop: 8 }}>
-              Fazer upgrade para o Pro
-            </a>
-            <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 12 }}>
-              Faça upgrade agora e já entre garantido no lançamento.
-            </p>
-          </>
-        )}
+        <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", display: "inline-block", marginTop: 8 }}>
+          Fazer upgrade para o Pro
+        </a>
+        <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 12 }}>
+          Faça upgrade agora e já entre garantido no lançamento.
+        </p>
       </div>
     </div>
   );
