@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -120,12 +120,17 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
   );
 }
 
-function Sidebar({ active, setActive, userName, mobileOpen, onClose }) {
+const MENTOR_ADMIN_EMAIL = "prosolucoeseducaionais@gmail.com";
+
+function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }) {
+  const isMentorAdmin = (userEmail || "").toLowerCase() === MENTOR_ADMIN_EMAIL;
+
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
     { id: "mindset", label: "Mente de Trader", icon: Brain },
     { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck },
+    ...(isMentorAdmin ? [{ id: "mentors", label: "Mentores", icon: Users, badge: "Dev" }] : []),
     { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
@@ -2513,6 +2518,176 @@ function MindsetView({ trades, isProPlan }) {
   );
 }
 
+function MentoresView({ session }) {
+  const [mentors, setMentors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [newMentorName, setNewMentorName] = useState("");
+  const [newMentorBio, setNewMentorBio] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const [selectedMentorId, setSelectedMentorId] = useState(null);
+  const [postingAsMentorId, setPostingAsMentorId] = useState("");
+  const [messageText, setMessageText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState([]);
+
+  const loadMentors = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("mentors").select("*").order("created_at", { ascending: false });
+    if (!error) setMentors(data || []);
+    setLoading(false);
+  };
+
+  const loadMyMentor = async () => {
+    const { data } = await supabase.from("mentor_students").select("mentor_id").eq("student_user_id", session.user.id).maybeSingle();
+    setSelectedMentorId(data?.mentor_id || null);
+  };
+
+  const loadMessages = async (mentorId) => {
+    if (!mentorId) { setMessages([]); return; }
+    const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", mentorId).order("created_at", { ascending: false }).limit(50);
+    setMessages(data || []);
+  };
+
+  useEffect(() => { loadMentors(); loadMyMentor(); }, []);
+  useEffect(() => { loadMessages(selectedMentorId); }, [selectedMentorId]);
+
+  if ((session?.user?.email || "").toLowerCase() !== MENTOR_ADMIN_EMAIL) {
+    return null;
+  }
+
+  const handleCreateMentor = async (e) => {
+    e.preventDefault();
+    if (!newMentorName.trim()) return;
+    setCreating(true);
+    const { error } = await supabase.from("mentors").insert({ name: newMentorName.trim(), bio: newMentorBio.trim() || null });
+    setCreating(false);
+    if (error) { alert("Não consegui criar o mentor: " + error.message); return; }
+    setNewMentorName(""); setNewMentorBio("");
+    await loadMentors();
+  };
+
+  const handleSelectMentor = async (mentorId) => {
+    const { error } = await supabase.from("mentor_students").upsert(
+      { student_user_id: session.user.id, mentor_id: mentorId, selected_at: new Date().toISOString() },
+      { onConflict: "student_user_id" }
+    );
+    if (error) { alert("Não consegui selecionar o mentor: " + error.message); return; }
+    setSelectedMentorId(mentorId);
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!postingAsMentorId || !messageText.trim()) return;
+    setSending(true);
+    const { error } = await supabase.from("mentor_messages").insert({ mentor_id: postingAsMentorId, content: messageText.trim() });
+    setSending(false);
+    if (error) { alert("Não consegui enviar a mensagem: " + error.message); return; }
+    setMessageText("");
+    if (postingAsMentorId === selectedMentorId) await loadMessages(selectedMentorId);
+  };
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Mentores</h1><p className="tf-muted">Área em construção — visível só pra essa conta, ainda invisível pros clientes</p></div>
+      </div>
+
+      <div className="tf-disclaimer-box" style={{ marginBottom: 20 }}>
+        <AlertTriangle size={16} />
+        <p>Essa tela é um ambiente de testes enquanto o recurso é construído. Ela não aparece pra nenhum cliente Starter ou Pro — só pra essa conta específica.</p>
+      </div>
+
+      <div className="tf-two-col">
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Cadastrar mentor</h3></div>
+          <form className="tf-form" onSubmit={handleCreateMentor}>
+            <div className="tf-form-row">
+              <label>Nome do mentor</label>
+              <input value={newMentorName} onChange={(e) => setNewMentorName(e.target.value)} placeholder="Ex: João Silva" />
+            </div>
+            <div className="tf-form-row">
+              <label>Bio (opcional)</label>
+              <textarea className="tf-textarea" value={newMentorBio} onChange={(e) => setNewMentorBio(e.target.value)} rows={2} placeholder="Especialista em B3, 10 anos de mercado..." />
+            </div>
+            <button className="tf-btn-primary tf-form-submit" disabled={creating}>{creating ? "Criando..." : "Cadastrar mentor"}</button>
+          </form>
+
+          <div style={{ marginTop: 20 }}>
+            <h4 className="tf-news-section-title">Mentores cadastrados</h4>
+            {loading ? <p className="tf-muted">Carregando...</p> : mentors.length === 0 ? (
+              <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum mentor cadastrado ainda.</p>
+            ) : (
+              <div className="tf-trade-list">
+                {mentors.map((m) => (
+                  <div className="tf-trade-row" key={m.id}>
+                    <span className="tf-asset">{m.name}</span>
+                    <span className="tf-muted" style={{ fontSize: 12, flex: 1 }}>{m.bio}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Simular envio (como mentor)</h3></div>
+          <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
+            No app de verdade, isso vai ser uma tela própria só do mentor, sem precisar escolher "enviar como".
+          </p>
+          <form className="tf-form" onSubmit={handleSendMessage}>
+            <div className="tf-form-row">
+              <label>Enviar como</label>
+              <select value={postingAsMentorId} onChange={(e) => setPostingAsMentorId(e.target.value)}>
+                <option value="">Selecione um mentor</option>
+                {mentors.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+            <div className="tf-form-row">
+              <label>Mensagem / sinal</label>
+              <textarea className="tf-textarea" value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={3} placeholder="Ex: Compra WIN 172.500, stop 172.200, alvo 173.100" />
+            </div>
+            <button className="tf-btn-primary tf-form-submit" disabled={sending}><Send size={15} /> {sending ? "Enviando..." : "Enviar mensagem"}</button>
+          </form>
+        </div>
+      </div>
+
+      <div className="tf-card" style={{ marginTop: 20 }}>
+        <div className="tf-card-head"><h3>Simular lado do aluno</h3></div>
+        <p className="tf-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Escolhe um mentor pra "seguir" e veja como o feed de mensagens dele aparece.</p>
+        {mentors.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Cadastra um mentor primeiro pra testar essa parte.</p>
+        ) : (
+          <div className="tf-mood-pills" style={{ marginBottom: 18 }}>
+            {mentors.map((m) => (
+              <button key={m.id} className={`tf-mood-pill ${selectedMentorId === m.id ? "active" : ""}`} onClick={() => handleSelectMentor(m.id)}>
+                {m.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedMentorId ? (
+          messages.length === 0 ? (
+            <p className="tf-muted" style={{ fontSize: 13 }}>Esse mentor ainda não enviou nenhuma mensagem.</p>
+          ) : (
+            <div className="tf-trade-list">
+              {messages.map((msg) => (
+                <div key={msg.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+                  <p style={{ margin: 0, fontSize: 13.5 }}>{msg.content}</p>
+                  <span className="tf-muted" style={{ fontSize: 11 }}>{new Date(msg.created_at).toLocaleString("pt-BR")}</span>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Escolhe um mentor acima pra ver as mensagens dele.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const TOOL_TABS = [
   { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
   { id: "impostos", label: "Calculadora de Imposto", icon: Scale },
@@ -3093,6 +3268,7 @@ export default function App() {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
+      case "mentors": return <MentoresView session={session} />;
       case "mindset": return <MindsetView trades={trades} isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
@@ -3129,6 +3305,7 @@ export default function App() {
             active={active}
             setActive={setActive}
             userName={profile.name}
+            userEmail={session?.user?.email}
             mobileOpen={mobileNavOpen}
             onClose={() => setMobileNavOpen(false)}
           />
