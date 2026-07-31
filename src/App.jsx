@@ -120,7 +120,7 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
   );
 }
 
-const MENTOR_ADMIN_EMAIL = "prosolucoeseducaionais@gmail.com";
+const MENTOR_ADMIN_EMAIL = "prosolucoeseducacionais@gmail.com";
 
 function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }) {
   const isMentorAdmin = (userEmail || "").toLowerCase() === MENTOR_ADMIN_EMAIL;
