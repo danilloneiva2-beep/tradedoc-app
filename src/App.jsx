@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -123,6 +123,7 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
 const MENTOR_BETA_TESTERS = [
   "prosolucoeseducacionais@gmail.com",
   "emmanuellelazzarotti@hotmail.com",
+  "danilloneiva2@gmail.com",
 ];
 
 function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }) {
@@ -2521,40 +2522,80 @@ function MindsetView({ trades, isProPlan }) {
   );
 }
 
+function MentorPicker({ mentors, selectedMentorId, onSelect, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const selected = mentors.find((m) => m.id === selectedMentorId);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="tf-mentor-picker" ref={ref}>
+      <button type="button" className="tf-mentor-picker-btn" onClick={() => !disabled && setOpen(!open)} disabled={disabled}>
+        <Users size={16} />
+        <span>{selected ? selected.name : "Escolher mentor"}</span>
+        <ChevronDown size={15} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s", marginLeft: "auto" }} />
+      </button>
+      {open && (
+        <div className="tf-mentor-picker-list">
+          {mentors.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={`tf-mentor-picker-item ${m.id === selectedMentorId ? "active" : ""}`}
+              onClick={() => { onSelect(m.id); setOpen(false); }}
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StudentMentorView({ session, mentors, loadingMentors }) {
-  const [selectedMentorId, setSelectedMentorId] = useState(null);
+  const [myLink, setMyLink] = useState(null); // { mentor_id, status }
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const loadMyMentor = async () => {
-    const { data } = await supabase.from("mentor_students").select("mentor_id").eq("student_user_id", session.user.id).maybeSingle();
-    setSelectedMentorId(data?.mentor_id || null);
+  const loadMyLink = async () => {
+    const { data } = await supabase.from("mentor_students").select("mentor_id, status").eq("student_user_id", session.user.id).maybeSingle();
+    setMyLink(data || null);
   };
 
   const loadMessages = async (mentorId) => {
     if (!mentorId) { setMessages([]); return; }
     setLoadingMessages(true);
-    const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", mentorId).order("created_at", { ascending: false }).limit(50);
+    const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", mentorId).order("created_at", { ascending: true }).limit(100);
     setMessages(data || []);
     setLoadingMessages(false);
   };
 
-  useEffect(() => { loadMyMentor(); }, []);
-  useEffect(() => { loadMessages(selectedMentorId); }, [selectedMentorId]);
+  useEffect(() => { loadMyLink(); }, []);
+  useEffect(() => {
+    if (myLink?.status === "approved") loadMessages(myLink.mentor_id);
+  }, [myLink?.mentor_id, myLink?.status]);
 
   const handleSelectMentor = async (mentorId) => {
     setSaving(true);
     const { error } = await supabase.from("mentor_students").upsert(
-      { student_user_id: session.user.id, mentor_id: mentorId, selected_at: new Date().toISOString() },
+      { student_user_id: session.user.id, mentor_id: mentorId, student_email: session.user.email, status: "pending", selected_at: new Date().toISOString() },
       { onConflict: "student_user_id" }
     );
     setSaving(false);
     if (error) { alert("Não consegui selecionar o mentor: " + error.message); return; }
-    setSelectedMentorId(mentorId);
+    setMyLink({ mentor_id: mentorId, status: "pending" });
   };
 
-  const currentMentor = mentors.find((m) => m.id === selectedMentorId);
+  const currentMentor = mentors.find((m) => m.id === myLink?.mentor_id);
 
   return (
     <div className="tf-view">
@@ -2571,35 +2612,51 @@ function StudentMentorView({ session, mentors, loadingMentors }) {
         ) : (
           <>
             <p className="tf-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
-              {currentMentor ? "Você está seguindo este mentor. Pode trocar quando quiser." : "Escolhe um mentor pra começar a receber as mensagens dele."}
+              {myLink?.status === "approved"
+                ? "Você já está liberado para receber as mensagens desse mentor."
+                : myLink?.status === "pending"
+                ? "Seu pedido foi enviado — assim que o mentor aprovar, as mensagens aparecem aqui."
+                : "Escolhe um mentor pra enviar o pedido de acompanhamento."}
             </p>
-            <div className="tf-mood-pills">
-              {mentors.map((m) => (
-                <button key={m.id} className={`tf-mood-pill ${selectedMentorId === m.id ? "active" : ""}`} onClick={() => handleSelectMentor(m.id)} disabled={saving}>
-                  {m.name}
-                </button>
-              ))}
-            </div>
+            <MentorPicker mentors={mentors} selectedMentorId={myLink?.mentor_id} onSelect={handleSelectMentor} disabled={saving} />
           </>
         )}
       </div>
 
-      <div className="tf-card">
-        <div className="tf-card-head"><h3>Mensagens {currentMentor ? `de ${currentMentor.name}` : ""}</h3></div>
-        {!selectedMentorId ? (
-          <p className="tf-muted" style={{ fontSize: 13 }}>Escolhe um mentor acima pra ver as mensagens dele aqui.</p>
+      <div className="tf-card" style={{ padding: myLink?.status === "approved" ? 0 : undefined, overflow: "hidden" }}>
+        {!myLink?.mentor_id ? (
+          <p className="tf-muted" style={{ fontSize: 13, padding: 20 }}>Escolhe um mentor acima pra começar.</p>
+        ) : myLink.status === "pending" ? (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <Loader2 size={26} className="tf-spin text-lime" />
+            <p className="tf-muted" style={{ fontSize: 13.5, marginTop: 14 }}>
+              Aguardando <b style={{ color: "var(--text)" }}>{currentMentor?.name}</b> aprovar seu acesso.
+            </p>
+          </div>
+        ) : myLink.status === "rejected" ? (
+          <p className="text-coral" style={{ fontSize: 13.5, padding: 20 }}>
+            Esse mentor não aprovou seu pedido. Escolhe outro mentor acima pra tentar de novo.
+          </p>
         ) : loadingMessages ? (
-          <p className="tf-muted">Carregando mensagens...</p>
-        ) : messages.length === 0 ? (
-          <p className="tf-muted" style={{ fontSize: 13 }}>Esse mentor ainda não enviou nenhuma mensagem.</p>
+          <p className="tf-muted" style={{ padding: 20 }}>Carregando mensagens...</p>
         ) : (
-          <div className="tf-trade-list">
-            {messages.map((msg) => (
-              <div key={msg.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-                <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5 }}>{msg.content}</p>
-                <span className="tf-muted" style={{ fontSize: 11 }}>{new Date(msg.created_at).toLocaleString("pt-BR")}</span>
-              </div>
-            ))}
+          <div className="tf-chat-window">
+            <div className="tf-chat-header">
+              <div className="tf-chat-avatar">{currentMentor?.name?.charAt(0) || "M"}</div>
+              <span>{currentMentor?.name}</span>
+            </div>
+            <div className="tf-chat-body">
+              {messages.length === 0 ? (
+                <p className="tf-muted" style={{ fontSize: 13, textAlign: "center", marginTop: 30 }}>Esse mentor ainda não enviou nenhuma mensagem.</p>
+              ) : (
+                messages.map((msg) => (
+                  <div key={msg.id} className="tf-chat-bubble">
+                    <p>{msg.content}</p>
+                    <span className="tf-chat-time">{new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -2615,6 +2672,8 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
+  const [pending, setPending] = useState([]);
+  const [loadingPending, setLoadingPending] = useState(true);
 
   const loadMyMessages = async () => {
     if (!myMentor) { setLoadingMessages(false); return; }
@@ -2624,7 +2683,15 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
     setLoadingMessages(false);
   };
 
-  useEffect(() => { loadMyMessages(); }, [myMentor?.id]);
+  const loadPending = async () => {
+    if (!myMentor) { setLoadingPending(false); return; }
+    setLoadingPending(true);
+    const { data } = await supabase.from("mentor_students").select("id, student_email, status").eq("mentor_id", myMentor.id).eq("status", "pending").order("selected_at", { ascending: true });
+    setPending(data || []);
+    setLoadingPending(false);
+  };
+
+  useEffect(() => { loadMyMessages(); loadPending(); }, [myMentor?.id]);
 
   const handleCreateMentor = async (e) => {
     e.preventDefault();
@@ -2648,17 +2715,46 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
     await loadMyMessages();
   };
 
+  const handleApprove = async (requestId) => {
+    const { error } = await supabase.from("mentor_students").update({ status: "approved" }).eq("id", requestId);
+    if (error) { alert("Não consegui aprovar: " + error.message); return; }
+    await loadPending();
+  };
+
+  const handleReject = async (requestId) => {
+    const { error } = await supabase.from("mentor_students").update({ status: "rejected" }).eq("id", requestId);
+    if (error) { alert("Não consegui recusar: " + error.message); return; }
+    await loadPending();
+  };
+
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Mentores</h1><p className="tf-muted">Envie mensagens pros seus alunos e gerencie mentores cadastrados</p></div>
+        <div><h1>Mentores</h1><p className="tf-muted">Envie mensagens pros seus alunos e gerencie quem tem acesso</p></div>
       </div>
+
+      {pending.length > 0 && (
+        <div className="tf-card" style={{ marginBottom: 20 }}>
+          <div className="tf-card-head"><h3>Solicitações pendentes</h3></div>
+          <div className="tf-approval-list">
+            {pending.map((r) => (
+              <div className="tf-approval-row" key={r.id}>
+                <span>{r.student_email}</span>
+                <div className="tf-approval-actions">
+                  <button className="tf-approve-btn" onClick={() => handleApprove(r.id)} title="Aprovar"><Check size={18} /></button>
+                  <button className="tf-reject-btn" onClick={() => handleReject(r.id)} title="Recusar"><X size={18} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="tf-two-col">
         <div className="tf-card">
           <div className="tf-card-head"><h3>Enviar mensagem pros seus alunos</h3></div>
           <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
-            Enviando como <b>{myMentor?.name}</b>. Só quem escolheu você como mentor recebe.
+            Enviando como <b>{myMentor?.name}</b>. Só alunos aprovados recebem.
           </p>
           <form className="tf-form" onSubmit={handleSendMessage}>
             <div className="tf-form-row">
@@ -3505,6 +3601,65 @@ const APP_STYLES = `
 .tf-trade-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
 
 .tf-mood-pills{display:flex;gap:6px;flex-wrap:wrap;}
+
+/* --- Seletor de mentor (lista suspensa) --- */
+.tf-mentor-picker{position:relative; width:100%; max-width:340px;}
+.tf-mentor-picker-btn{
+  display:flex; align-items:center; gap:10px; width:100%;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
+  padding:11px 14px; color:var(--text); font-size:13.5px; font-weight:600; cursor:pointer;
+}
+.tf-mentor-picker-btn:disabled{opacity:.6; cursor:default;}
+.tf-mentor-picker-list{
+  position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:20;
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  max-height:220px; overflow-y:auto; box-shadow:0 12px 30px -8px rgba(0,0,0,.5);
+}
+.tf-mentor-picker-item{
+  display:block; width:100%; text-align:left; background:none; border:none;
+  padding:11px 14px; font-size:13.5px; color:var(--text); cursor:pointer; border-bottom:1px solid var(--border);
+}
+.tf-mentor-picker-item:last-child{border-bottom:none;}
+.tf-mentor-picker-item:hover{background:var(--surface-2);}
+.tf-mentor-picker-item.active{color:var(--lime); font-weight:700;}
+
+/* --- Chat estilo WhatsApp (lado do aluno) --- */
+.tf-chat-window{display:flex; flex-direction:column; height:480px;}
+.tf-chat-header{
+  display:flex; align-items:center; gap:10px; padding:14px 18px;
+  border-bottom:1px solid var(--border); background:var(--surface-2); font-weight:700; font-size:14px;
+}
+.tf-chat-avatar{
+  width:32px; height:32px; border-radius:50%; background:var(--lime); color:#06280F;
+  display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; flex-shrink:0;
+}
+.tf-chat-body{
+  flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(34,197,94,0.03) 0%, transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(37,99,235,0.03) 0%, transparent 40%);
+}
+.tf-chat-bubble{
+  align-self:flex-start; max-width:78%; background:var(--surface-2); border:1px solid var(--border);
+  border-radius:14px 14px 14px 3px; padding:10px 13px 16px; position:relative;
+}
+.tf-chat-bubble p{margin:0; font-size:13.5px; line-height:1.5; color:var(--text); white-space:pre-wrap;}
+.tf-chat-time{position:absolute; bottom:5px; right:11px; font-size:10px; color:var(--muted);}
+
+/* --- Botões de aprovação (mentor) --- */
+.tf-approval-list{display:flex; flex-direction:column; gap:8px;}
+.tf-approval-row{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:10px 14px; font-size:13px;
+}
+.tf-approval-actions{display:flex; gap:8px; flex-shrink:0;}
+.tf-approve-btn, .tf-reject-btn{
+  width:32px; height:32px; border-radius:50%; border:none; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:transform .15s;
+}
+.tf-approve-btn{background:var(--lime); color:#06280F;}
+.tf-reject-btn{background:var(--coral); color:#2A0B10;}
+.tf-approve-btn:hover, .tf-reject-btn:hover{transform:scale(1.08);}
 .tf-mood-pill{
   background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
   font-size:12px;padding:6px 13px;border-radius:20px;cursor:pointer;transition:all .15s;
