@@ -120,6 +120,8 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
   );
 }
 
+const MENTOR_OWNER_EMAIL = "prosolucoeseducacionais@gmail.com";
+
 const MENTOR_BETA_TESTERS = [
   "prosolucoeseducacionais@gmail.com",
   "emmanuellelazzarotti@hotmail.com",
@@ -2665,6 +2667,7 @@ function StudentMentorView({ session, mentors, loadingMentors }) {
 }
 
 function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
+  const isOwner = (session?.user?.email || "").toLowerCase() === MENTOR_OWNER_EMAIL;
   const [newMentorName, setNewMentorName] = useState("");
   const [newMentorBio, setNewMentorBio] = useState("");
   const [creating, setCreating] = useState(false);
@@ -2783,7 +2786,7 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
         </div>
       )}
 
-      <div className="tf-two-col">
+      <div className={isOwner ? "tf-two-col" : ""}>
         <div className="tf-card">
           <div className="tf-card-head"><h3>Enviar mensagem pros seus alunos</h3></div>
           <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
@@ -2816,6 +2819,7 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
           </div>
         </div>
 
+        {isOwner && (
         <div className="tf-card">
           <div className="tf-card-head"><h3>Cadastrar novo mentor</h3></div>
           <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
@@ -2865,6 +2869,7 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
