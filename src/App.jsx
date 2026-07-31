@@ -120,17 +120,20 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
   );
 }
 
-const MENTOR_ADMIN_EMAIL = "prosolucoeseducacionais@gmail.com";
+const MENTOR_BETA_TESTERS = [
+  "prosolucoeseducacionais@gmail.com",
+  "emmanuellelazzarotti@hotmail.com",
+];
 
 function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }) {
-  const isMentorAdmin = (userEmail || "").toLowerCase() === MENTOR_ADMIN_EMAIL;
+  const isMentorBetaTester = MENTOR_BETA_TESTERS.includes((userEmail || "").toLowerCase());
 
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
     { id: "mindset", label: "Mente de Trader", icon: Brain },
     { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck },
-    ...(isMentorAdmin ? [{ id: "mentors", label: "Mentores", icon: Users, badge: "Dev" }] : []),
+    ...(isMentorBetaTester ? [{ id: "mentors", label: "Mentores", icon: Users, badge: "Beta" }] : []),
     { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
@@ -2518,25 +2521,11 @@ function MindsetView({ trades, isProPlan }) {
   );
 }
 
-function MentoresView({ session }) {
-  const [mentors, setMentors] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [newMentorName, setNewMentorName] = useState("");
-  const [newMentorBio, setNewMentorBio] = useState("");
-  const [creating, setCreating] = useState(false);
-
+function StudentMentorView({ session, mentors, loadingMentors }) {
   const [selectedMentorId, setSelectedMentorId] = useState(null);
-  const [postingAsMentorId, setPostingAsMentorId] = useState("");
-  const [messageText, setMessageText] = useState("");
-  const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState([]);
-
-  const loadMentors = async () => {
-    setLoading(true);
-    const { data, error } = await supabase.from("mentors").select("*").order("created_at", { ascending: false });
-    if (!error) setMentors(data || []);
-    setLoading(false);
-  };
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const loadMyMentor = async () => {
     const { data } = await supabase.from("mentor_students").select("mentor_id").eq("student_user_id", session.user.id).maybeSingle();
@@ -2545,16 +2534,97 @@ function MentoresView({ session }) {
 
   const loadMessages = async (mentorId) => {
     if (!mentorId) { setMessages([]); return; }
+    setLoadingMessages(true);
     const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", mentorId).order("created_at", { ascending: false }).limit(50);
     setMessages(data || []);
+    setLoadingMessages(false);
   };
 
-  useEffect(() => { loadMentors(); loadMyMentor(); }, []);
+  useEffect(() => { loadMyMentor(); }, []);
   useEffect(() => { loadMessages(selectedMentorId); }, [selectedMentorId]);
 
-  if ((session?.user?.email || "").toLowerCase() !== MENTOR_ADMIN_EMAIL) {
-    return null;
-  }
+  const handleSelectMentor = async (mentorId) => {
+    setSaving(true);
+    const { error } = await supabase.from("mentor_students").upsert(
+      { student_user_id: session.user.id, mentor_id: mentorId, selected_at: new Date().toISOString() },
+      { onConflict: "student_user_id" }
+    );
+    setSaving(false);
+    if (error) { alert("Não consegui selecionar o mentor: " + error.message); return; }
+    setSelectedMentorId(mentorId);
+  };
+
+  const currentMentor = mentors.find((m) => m.id === selectedMentorId);
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Mentores</h1><p className="tf-muted">Escolha seu mentor e receba as mensagens dele em tempo real</p></div>
+      </div>
+
+      <div className="tf-card" style={{ marginBottom: 20 }}>
+        <div className="tf-card-head"><h3>Seu mentor</h3></div>
+        {loadingMentors ? (
+          <p className="tf-muted">Carregando...</p>
+        ) : mentors.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum mentor disponível ainda.</p>
+        ) : (
+          <>
+            <p className="tf-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
+              {currentMentor ? "Você está seguindo este mentor. Pode trocar quando quiser." : "Escolhe um mentor pra começar a receber as mensagens dele."}
+            </p>
+            <div className="tf-mood-pills">
+              {mentors.map((m) => (
+                <button key={m.id} className={`tf-mood-pill ${selectedMentorId === m.id ? "active" : ""}`} onClick={() => handleSelectMentor(m.id)} disabled={saving}>
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="tf-card">
+        <div className="tf-card-head"><h3>Mensagens {currentMentor ? `de ${currentMentor.name}` : ""}</h3></div>
+        {!selectedMentorId ? (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Escolhe um mentor acima pra ver as mensagens dele aqui.</p>
+        ) : loadingMessages ? (
+          <p className="tf-muted">Carregando mensagens...</p>
+        ) : messages.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Esse mentor ainda não enviou nenhuma mensagem.</p>
+        ) : (
+          <div className="tf-trade-list">
+            {messages.map((msg) => (
+              <div key={msg.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
+                <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5 }}>{msg.content}</p>
+                <span className="tf-muted" style={{ fontSize: 11 }}>{new Date(msg.created_at).toLocaleString("pt-BR")}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
+  const [newMentorName, setNewMentorName] = useState("");
+  const [newMentorBio, setNewMentorBio] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [messageText, setMessageText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(true);
+
+  const loadMyMessages = async () => {
+    if (!myMentor) { setLoadingMessages(false); return; }
+    setLoadingMessages(true);
+    const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", myMentor.id).order("created_at", { ascending: false }).limit(50);
+    setMessages(data || []);
+    setLoadingMessages(false);
+  };
+
+  useEffect(() => { loadMyMessages(); }, [myMentor?.id]);
 
   const handleCreateMentor = async (e) => {
     e.preventDefault();
@@ -2564,43 +2634,64 @@ function MentoresView({ session }) {
     setCreating(false);
     if (error) { alert("Não consegui criar o mentor: " + error.message); return; }
     setNewMentorName(""); setNewMentorBio("");
-    await loadMentors();
-  };
-
-  const handleSelectMentor = async (mentorId) => {
-    const { error } = await supabase.from("mentor_students").upsert(
-      { student_user_id: session.user.id, mentor_id: mentorId, selected_at: new Date().toISOString() },
-      { onConflict: "student_user_id" }
-    );
-    if (error) { alert("Não consegui selecionar o mentor: " + error.message); return; }
-    setSelectedMentorId(mentorId);
+    await reloadMentors();
   };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!postingAsMentorId || !messageText.trim()) return;
+    if (!myMentor || !messageText.trim()) return;
     setSending(true);
-    const { error } = await supabase.from("mentor_messages").insert({ mentor_id: postingAsMentorId, content: messageText.trim() });
+    const { error } = await supabase.from("mentor_messages").insert({ mentor_id: myMentor.id, content: messageText.trim() });
     setSending(false);
     if (error) { alert("Não consegui enviar a mensagem: " + error.message); return; }
     setMessageText("");
-    if (postingAsMentorId === selectedMentorId) await loadMessages(selectedMentorId);
+    await loadMyMessages();
   };
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
-        <div><h1>Mentores</h1><p className="tf-muted">Área em construção — visível só pra essa conta, ainda invisível pros clientes</p></div>
-      </div>
-
-      <div className="tf-disclaimer-box" style={{ marginBottom: 20 }}>
-        <AlertTriangle size={16} />
-        <p>Essa tela é um ambiente de testes enquanto o recurso é construído. Ela não aparece pra nenhum cliente Starter ou Pro — só pra essa conta específica.</p>
+        <div><h1>Mentores</h1><p className="tf-muted">Envie mensagens pros seus alunos e gerencie mentores cadastrados</p></div>
       </div>
 
       <div className="tf-two-col">
         <div className="tf-card">
-          <div className="tf-card-head"><h3>Cadastrar mentor</h3></div>
+          <div className="tf-card-head"><h3>Enviar mensagem pros seus alunos</h3></div>
+          <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
+            Enviando como <b>{myMentor?.name}</b>. Só quem escolheu você como mentor recebe.
+          </p>
+          <form className="tf-form" onSubmit={handleSendMessage}>
+            <div className="tf-form-row">
+              <label>Mensagem / sinal</label>
+              <textarea className="tf-textarea" value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={3} placeholder="Ex: Compra WIN 172.500, stop 172.200, alvo 173.100" />
+            </div>
+            <button className="tf-btn-primary tf-form-submit" disabled={sending}><Send size={15} /> {sending ? "Enviando..." : "Enviar mensagem"}</button>
+          </form>
+
+          <div style={{ marginTop: 22 }}>
+            <h4 className="tf-news-section-title">Suas mensagens enviadas</h4>
+            {loadingMessages ? (
+              <p className="tf-muted">Carregando...</p>
+            ) : messages.length === 0 ? (
+              <p className="tf-muted" style={{ fontSize: 13 }}>Você ainda não enviou nenhuma mensagem.</p>
+            ) : (
+              <div className="tf-trade-list">
+                {messages.map((msg) => (
+                  <div key={msg.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+                    <p style={{ margin: 0, fontSize: 13 }}>{msg.content}</p>
+                    <span className="tf-muted" style={{ fontSize: 11 }}>{new Date(msg.created_at).toLocaleString("pt-BR")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Cadastrar novo mentor</h3></div>
+          <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
+            Cadastre outros mentores que também vão poder enviar mensagens pros próprios alunos.
+          </p>
           <form className="tf-form" onSubmit={handleCreateMentor}>
             <div className="tf-form-row">
               <label>Nome do mentor</label>
@@ -2615,7 +2706,7 @@ function MentoresView({ session }) {
 
           <div style={{ marginTop: 20 }}>
             <h4 className="tf-news-section-title">Mentores cadastrados</h4>
-            {loading ? <p className="tf-muted">Carregando...</p> : mentors.length === 0 ? (
+            {mentors.length === 0 ? (
               <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum mentor cadastrado ainda.</p>
             ) : (
               <div className="tf-trade-list">
@@ -2623,70 +2714,53 @@ function MentoresView({ session }) {
                   <div className="tf-trade-row" key={m.id}>
                     <span className="tf-asset">{m.name}</span>
                     <span className="tf-muted" style={{ fontSize: 12, flex: 1 }}>{m.bio}</span>
+                    {m.user_id === session.user.id && <span className="tf-nav-badge">Você</span>}
                   </div>
                 ))}
               </div>
             )}
           </div>
         </div>
-
-        <div className="tf-card">
-          <div className="tf-card-head"><h3>Simular envio (como mentor)</h3></div>
-          <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
-            No app de verdade, isso vai ser uma tela própria só do mentor, sem precisar escolher "enviar como".
-          </p>
-          <form className="tf-form" onSubmit={handleSendMessage}>
-            <div className="tf-form-row">
-              <label>Enviar como</label>
-              <select value={postingAsMentorId} onChange={(e) => setPostingAsMentorId(e.target.value)}>
-                <option value="">Selecione um mentor</option>
-                {mentors.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </div>
-            <div className="tf-form-row">
-              <label>Mensagem / sinal</label>
-              <textarea className="tf-textarea" value={messageText} onChange={(e) => setMessageText(e.target.value)} rows={3} placeholder="Ex: Compra WIN 172.500, stop 172.200, alvo 173.100" />
-            </div>
-            <button className="tf-btn-primary tf-form-submit" disabled={sending}><Send size={15} /> {sending ? "Enviando..." : "Enviar mensagem"}</button>
-          </form>
-        </div>
-      </div>
-
-      <div className="tf-card" style={{ marginTop: 20 }}>
-        <div className="tf-card-head"><h3>Simular lado do aluno</h3></div>
-        <p className="tf-muted" style={{ fontSize: 12.5, marginBottom: 14 }}>Escolhe um mentor pra "seguir" e veja como o feed de mensagens dele aparece.</p>
-        {mentors.length === 0 ? (
-          <p className="tf-muted" style={{ fontSize: 13 }}>Cadastra um mentor primeiro pra testar essa parte.</p>
-        ) : (
-          <div className="tf-mood-pills" style={{ marginBottom: 18 }}>
-            {mentors.map((m) => (
-              <button key={m.id} className={`tf-mood-pill ${selectedMentorId === m.id ? "active" : ""}`} onClick={() => handleSelectMentor(m.id)}>
-                {m.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {selectedMentorId ? (
-          messages.length === 0 ? (
-            <p className="tf-muted" style={{ fontSize: 13 }}>Esse mentor ainda não enviou nenhuma mensagem.</p>
-          ) : (
-            <div className="tf-trade-list">
-              {messages.map((msg) => (
-                <div key={msg.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-                  <p style={{ margin: 0, fontSize: 13.5 }}>{msg.content}</p>
-                  <span className="tf-muted" style={{ fontSize: 11 }}>{new Date(msg.created_at).toLocaleString("pt-BR")}</span>
-                </div>
-              ))}
-            </div>
-          )
-        ) : (
-          <p className="tf-muted" style={{ fontSize: 13 }}>Escolhe um mentor acima pra ver as mensagens dele.</p>
-        )}
       </div>
     </div>
   );
 }
+
+function MentoresView({ session }) {
+  const [mentors, setMentors] = useState([]);
+  const [loadingMentors, setLoadingMentors] = useState(true);
+
+  const isBetaTester = MENTOR_BETA_TESTERS.includes((session?.user?.email || "").toLowerCase());
+
+  const loadMentors = async () => {
+    setLoadingMentors(true);
+    const { data, error } = await supabase.from("mentors").select("*").order("created_at", { ascending: false });
+    if (!error) setMentors(data || []);
+    setLoadingMentors(false);
+  };
+
+  useEffect(() => { loadMentors(); }, []);
+
+  if (!isBetaTester) return null;
+
+  const myMentor = mentors.find((m) => m.user_id === session.user.id);
+
+  if (loadingMentors) {
+    return (
+      <div className="tf-view">
+        <div className="tf-view-header"><div><h1>Mentores</h1></div></div>
+        <div className="tf-card" style={{ textAlign: "center", padding: 40 }}><p className="tf-muted">Carregando...</p></div>
+      </div>
+    );
+  }
+
+  return myMentor ? (
+    <MentorDashboardView session={session} mentors={mentors} myMentor={myMentor} reloadMentors={loadMentors} />
+  ) : (
+    <StudentMentorView session={session} mentors={mentors} loadingMentors={loadingMentors} />
+  );
+}
+
 
 const TOOL_TABS = [
   { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
