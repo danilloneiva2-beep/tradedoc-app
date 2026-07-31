@@ -2674,6 +2674,10 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [pending, setPending] = useState([]);
   const [loadingPending, setLoadingPending] = useState(true);
+  const [editingMentorId, setEditingMentorId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editBio, setEditBio] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const loadMyMessages = async () => {
     if (!myMentor) { setLoadingMessages(false); return; }
@@ -2701,6 +2705,35 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
     setCreating(false);
     if (error) { alert("Não consegui criar o mentor: " + error.message); return; }
     setNewMentorName(""); setNewMentorBio("");
+    await reloadMentors();
+  };
+
+  const startEditMentor = (mentor) => {
+    setEditingMentorId(mentor.id);
+    setEditName(mentor.name);
+    setEditBio(mentor.bio || "");
+  };
+
+  const cancelEditMentor = () => {
+    setEditingMentorId(null);
+    setEditName("");
+    setEditBio("");
+  };
+
+  const saveEditMentor = async (mentorId) => {
+    if (!editName.trim()) return;
+    setSavingEdit(true);
+    const { error } = await supabase.from("mentors").update({ name: editName.trim(), bio: editBio.trim() || null }).eq("id", mentorId);
+    setSavingEdit(false);
+    if (error) { alert("Não consegui salvar as alterações: " + error.message); return; }
+    cancelEditMentor();
+    await reloadMentors();
+  };
+
+  const handleDeleteMentor = async (mentor) => {
+    if (!window.confirm(`Apagar o mentor "${mentor.name}"? Isso também apaga as mensagens enviadas por ele e desvincula os alunos que o seguem. Essa ação não pode ser desfeita.`)) return;
+    const { error } = await supabase.from("mentors").delete().eq("id", mentor.id);
+    if (error) { alert("Não consegui apagar o mentor: " + error.message); return; }
     await reloadMentors();
   };
 
@@ -2807,11 +2840,26 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
             ) : (
               <div className="tf-trade-list">
                 {mentors.map((m) => (
-                  <div className="tf-trade-row" key={m.id}>
-                    <span className="tf-asset">{m.name}</span>
-                    <span className="tf-muted" style={{ fontSize: 12, flex: 1 }}>{m.bio}</span>
-                    {m.user_id === session.user.id && <span className="tf-nav-badge">Você</span>}
-                  </div>
+                  editingMentorId === m.id ? (
+                    <div className="tf-mentor-edit-row" key={m.id}>
+                      <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Nome do mentor" />
+                      <textarea className="tf-textarea" value={editBio} onChange={(e) => setEditBio(e.target.value)} rows={2} placeholder="Bio (opcional)" />
+                      <div className="tf-mentor-edit-actions">
+                        <button type="button" className="tf-btn-primary" onClick={() => saveEditMentor(m.id)} disabled={savingEdit}>
+                          {savingEdit ? "Salvando..." : "Salvar"}
+                        </button>
+                        <button type="button" className="tf-btn-outline" onClick={cancelEditMentor}>Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="tf-trade-row" key={m.id}>
+                      <span className="tf-asset">{m.name}</span>
+                      <span className="tf-muted" style={{ fontSize: 12, flex: 1 }}>{m.bio}</span>
+                      {m.user_id === session.user.id && <span className="tf-nav-badge">Você</span>}
+                      <button type="button" className="tf-row-action" onClick={() => startEditMentor(m)} title="Editar"><Pencil size={13} /></button>
+                      <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteMentor(m)} title="Apagar"><Trash2 size={13} /></button>
+                    </div>
+                  )
                 ))}
               </div>
             )}
@@ -3660,6 +3708,12 @@ const APP_STYLES = `
 .tf-approve-btn{background:var(--lime); color:#06280F;}
 .tf-reject-btn{background:var(--coral); color:#2A0B10;}
 .tf-approve-btn:hover, .tf-reject-btn:hover{transform:scale(1.08);}
+
+.tf-mentor-edit-row{
+  display:flex; flex-direction:column; gap:8px; padding:12px;
+  background:var(--surface-2); border:1px solid var(--lime); border-radius:10px; margin-bottom:8px;
+}
+.tf-mentor-edit-actions{display:flex; gap:8px;}
 .tf-mood-pill{
   background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
   font-size:12px;padding:6px 13px;border-radius:20px;cursor:pointer;transition:all .15s;
