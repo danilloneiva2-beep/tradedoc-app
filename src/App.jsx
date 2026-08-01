@@ -4078,7 +4078,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-weekday-value{ font-size:11.5px; min-width:76px; }
 
   /* iOS auto-zooms inputs with font-size below 16px on focus — force 16px to prevent it */
-  .tf-form-row input, .tf-form-row select, .tf-input-icon input {
+  .tf-form-row input, .tf-form-row select, .tf-input-icon input, .tf-textarea {
     font-size: 16px !important;
   }
 }
