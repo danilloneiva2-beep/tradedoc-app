@@ -2576,8 +2576,12 @@ function StudentMentorView({ session, mentors, loadingMentors }) {
   const loadMessages = async (mentorId) => {
     if (!mentorId) { setMessages([]); return; }
     setLoadingMessages(true);
-    const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", mentorId).order("created_at", { ascending: true }).limit(100);
-    setMessages(data || []);
+    // Busca as 100 mais RECENTES (ordem decrescente) e depois inverte pra
+    // exibir na ordem certa do chat (mais antiga em cima, mais nova embaixo).
+    // Antes buscava em ordem crescente com limite fixo, o que travava o
+    // chat nas 100 primeiras mensagens de sempre, sem nunca mostrar as novas.
+    const { data } = await supabase.from("mentor_messages").select("*").eq("mentor_id", mentorId).order("created_at", { ascending: false }).limit(100);
+    setMessages((data || []).slice().reverse());
     setLoadingMessages(false);
   };
 
