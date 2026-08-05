@@ -2917,6 +2917,13 @@ function MentoresView({ session }) {
 }
 
 
+function initialsFor(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function RankingView({ session }) {
   const isOwner = (session?.user?.email || "").toLowerCase() === MENTOR_OWNER_EMAIL;
   const [entries, setEntries] = useState([]);
@@ -2924,15 +2931,17 @@ function RankingView({ session }) {
 
   const [newPosition, setNewPosition] = useState("");
   const [newName, setNewName] = useState("");
+  const [newInstagram, setNewInstagram] = useState("");
   const [newScoreText, setNewScoreText] = useState("");
-  const [newSubtitle, setNewSubtitle] = useState("");
+  const [newMarket, setNewMarket] = useState("B3");
   const [creating, setCreating] = useState(false);
 
   const [editingId, setEditingId] = useState(null);
   const [editPosition, setEditPosition] = useState("");
   const [editName, setEditName] = useState("");
+  const [editInstagram, setEditInstagram] = useState("");
   const [editScoreText, setEditScoreText] = useState("");
-  const [editSubtitle, setEditSubtitle] = useState("");
+  const [editMarket, setEditMarket] = useState("B3");
   const [savingEdit, setSavingEdit] = useState(false);
 
   const loadEntries = async () => {
@@ -2953,12 +2962,13 @@ function RankingView({ session }) {
     const { error } = await supabase.from("trader_rankings").insert({
       position: Number(newPosition),
       display_name: newName.trim(),
+      subtitle: newInstagram.trim() ? `@${newInstagram.trim().replace(/^@/, "")}` : null,
       score_text: newScoreText.trim() || null,
-      subtitle: newSubtitle.trim() || null,
+      market: newMarket,
     });
     setCreating(false);
     if (error) { alert("Não consegui adicionar: " + error.message); return; }
-    setNewPosition(""); setNewName(""); setNewScoreText(""); setNewSubtitle("");
+    setNewPosition(""); setNewName(""); setNewInstagram(""); setNewScoreText(""); setNewMarket("B3");
     await loadEntries();
   };
 
@@ -2966,8 +2976,9 @@ function RankingView({ session }) {
     setEditingId(entry.id);
     setEditPosition(String(entry.position));
     setEditName(entry.display_name);
+    setEditInstagram((entry.subtitle || "").replace(/^@/, ""));
     setEditScoreText(entry.score_text || "");
-    setEditSubtitle(entry.subtitle || "");
+    setEditMarket(entry.market || "B3");
   };
 
   const cancelEdit = () => setEditingId(null);
@@ -2978,8 +2989,9 @@ function RankingView({ session }) {
     const { error } = await supabase.from("trader_rankings").update({
       position: Number(editPosition),
       display_name: editName.trim(),
+      subtitle: editInstagram.trim() ? `@${editInstagram.trim().replace(/^@/, "")}` : null,
       score_text: editScoreText.trim() || null,
-      subtitle: editSubtitle.trim() || null,
+      market: editMarket,
     }).eq("id", id);
     setSavingEdit(false);
     if (error) { alert("Não consegui salvar: " + error.message); return; }
@@ -3021,8 +3033,14 @@ function RankingView({ session }) {
                     <input value={editPosition} onChange={(ev) => setEditPosition(ev.target.value)} placeholder="Posição" inputMode="numeric" />
                     <input value={editName} onChange={(ev) => setEditName(ev.target.value)} placeholder="Nome" />
                   </div>
-                  <input value={editScoreText} onChange={(ev) => setEditScoreText(ev.target.value)} placeholder="Ex: 94% de acerto" />
-                  <input value={editSubtitle} onChange={(ev) => setEditSubtitle(ev.target.value)} placeholder="Subtítulo (opcional, ex: Trader de Forex)" />
+                  <div className="tf-form-row-inline">
+                    <input value={editInstagram} onChange={(ev) => setEditInstagram(ev.target.value)} placeholder="@ do instagram (sem @)" />
+                    <select value={editMarket} onChange={(ev) => setEditMarket(ev.target.value)}>
+                      <option value="B3">B3</option>
+                      <option value="Forex">Forex</option>
+                    </select>
+                  </div>
+                  <input value={editScoreText} onChange={(ev) => setEditScoreText(ev.target.value)} placeholder="Ex: +34,2% no mês" />
                   <div className="tf-mentor-edit-actions">
                     <button type="button" className="tf-btn-primary" onClick={() => saveEdit(e.id)} disabled={savingEdit}>{savingEdit ? "Salvando..." : "Salvar"}</button>
                     <button type="button" className="tf-btn-outline" onClick={cancelEdit}>Cancelar</button>
@@ -3031,11 +3049,13 @@ function RankingView({ session }) {
               ) : (
                 <div className="tf-ranking-row" key={e.id}>
                   <span className="tf-ranking-position">{medalFor(e.position) || `#${e.position}`}</span>
+                  <div className={`tf-ranking-avatar ${e.market === "Forex" ? "tf-ranking-avatar-forex" : "tf-ranking-avatar-b3"}`}>{initialsFor(e.display_name)}</div>
                   <div className="tf-ranking-info">
                     <span className="tf-ranking-name">{e.display_name}</span>
                     {e.subtitle && <span className="tf-ranking-subtitle">{e.subtitle}</span>}
                   </div>
                   {e.score_text && <span className="tf-ranking-score">{e.score_text}</span>}
+                  {e.market && <span className={`tf-ranking-market ${e.market === "Forex" ? "market-forex" : "market-b3"}`}>{e.market}</span>}
                   {isOwner && (
                     <div className="tf-ranking-actions">
                       <button type="button" className="tf-row-action" onClick={() => startEdit(e)} title="Editar"><Pencil size={13} /></button>
@@ -3066,13 +3086,22 @@ function RankingView({ session }) {
                 <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nome do trader" />
               </div>
             </div>
-            <div className="tf-form-row">
-              <label>Destaque (opcional)</label>
-              <input value={newScoreText} onChange={(e) => setNewScoreText(e.target.value)} placeholder="Ex: 94% de acerto, ou R$ 180 mil em 2026" />
+            <div className="tf-form-row-inline">
+              <div className="tf-form-row">
+                <label>@ do Instagram (opcional)</label>
+                <input value={newInstagram} onChange={(e) => setNewInstagram(e.target.value)} placeholder="usuario (sem @)" />
+              </div>
+              <div className="tf-form-row">
+                <label>Mercado</label>
+                <select value={newMarket} onChange={(e) => setNewMarket(e.target.value)}>
+                  <option value="B3">B3</option>
+                  <option value="Forex">Forex</option>
+                </select>
+              </div>
             </div>
             <div className="tf-form-row">
-              <label>Subtítulo (opcional)</label>
-              <input value={newSubtitle} onChange={(e) => setNewSubtitle(e.target.value)} placeholder="Ex: Trader de Forex" />
+              <label>Lucro do mês (opcional)</label>
+              <input value={newScoreText} onChange={(e) => setNewScoreText(e.target.value)} placeholder="Ex: +34,2%" />
             </div>
             <button className="tf-btn-primary tf-form-submit" disabled={creating}>{creating ? "Adicionando..." : "Adicionar ao ranking"}</button>
           </form>
@@ -3081,6 +3110,7 @@ function RankingView({ session }) {
     </div>
   );
 }
+
 
 const TOOL_TABS = [
   { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
@@ -3903,6 +3933,18 @@ const APP_STYLES = `
 .tf-ranking-subtitle{font-size:11.5px; color:var(--muted);}
 .tf-ranking-score{font-size:13px; font-weight:700; color:var(--lime); white-space:nowrap;}
 .tf-ranking-actions{display:flex; gap:6px; flex-shrink:0;}
+.tf-ranking-avatar{
+  width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:13px; flex-shrink:0;
+}
+.tf-ranking-avatar-b3{background:rgba(37,99,235,.18); color:#85B7EB;}
+.tf-ranking-avatar-forex{background:rgba(255,92,114,.18); color:#F0997B;}
+.tf-ranking-market{
+  flex-shrink:0; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+  padding:4px 9px; border-radius:20px;
+}
+.tf-ranking-market.market-b3{background:rgba(37,99,235,.16); color:#85B7EB;}
+.tf-ranking-market.market-forex{background:rgba(255,92,114,.16); color:#F0997B;}
 .tf-mood-pill{
   background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
   font-size:12px;padding:6px 13px;border-radius:20px;cursor:pointer;transition:all .15s;
