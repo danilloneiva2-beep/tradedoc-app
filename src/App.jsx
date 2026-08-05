@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -130,6 +130,7 @@ const MENTOR_BETA_TESTERS = [
 
 function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }) {
   const isMentorBetaTester = MENTOR_BETA_TESTERS.includes((userEmail || "").toLowerCase());
+  const isOwnerAccount = (userEmail || "").toLowerCase() === MENTOR_OWNER_EMAIL;
 
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -137,6 +138,7 @@ function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }
     { id: "mindset", label: "Mente de Trader", icon: Brain },
     { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck },
     ...(isMentorBetaTester ? [{ id: "mentors", label: "Mentores", icon: Users, badge: "Beta" }] : []),
+    ...(isOwnerAccount ? [{ id: "ranking", label: "Ranking", icon: Trophy, badge: "Beta" }] : []),
     { id: "news", label: "Notícias", icon: Newspaper },
     { id: "accounts", label: "Contas", icon: Wallet },
     { id: "tools", label: "Ferramentas", icon: Wrench },
@@ -2915,6 +2917,171 @@ function MentoresView({ session }) {
 }
 
 
+function RankingView({ session }) {
+  const isOwner = (session?.user?.email || "").toLowerCase() === MENTOR_OWNER_EMAIL;
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [newPosition, setNewPosition] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newScoreText, setNewScoreText] = useState("");
+  const [newSubtitle, setNewSubtitle] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const [editingId, setEditingId] = useState(null);
+  const [editPosition, setEditPosition] = useState("");
+  const [editName, setEditName] = useState("");
+  const [editScoreText, setEditScoreText] = useState("");
+  const [editSubtitle, setEditSubtitle] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const loadEntries = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from("trader_rankings").select("*").order("position", { ascending: true });
+    if (!error) setEntries(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadEntries(); }, []);
+
+  if (!isOwner) return null;
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!newName.trim() || !newPosition) return;
+    setCreating(true);
+    const { error } = await supabase.from("trader_rankings").insert({
+      position: Number(newPosition),
+      display_name: newName.trim(),
+      score_text: newScoreText.trim() || null,
+      subtitle: newSubtitle.trim() || null,
+    });
+    setCreating(false);
+    if (error) { alert("Não consegui adicionar: " + error.message); return; }
+    setNewPosition(""); setNewName(""); setNewScoreText(""); setNewSubtitle("");
+    await loadEntries();
+  };
+
+  const startEdit = (entry) => {
+    setEditingId(entry.id);
+    setEditPosition(String(entry.position));
+    setEditName(entry.display_name);
+    setEditScoreText(entry.score_text || "");
+    setEditSubtitle(entry.subtitle || "");
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async (id) => {
+    if (!editName.trim() || !editPosition) return;
+    setSavingEdit(true);
+    const { error } = await supabase.from("trader_rankings").update({
+      position: Number(editPosition),
+      display_name: editName.trim(),
+      score_text: editScoreText.trim() || null,
+      subtitle: editSubtitle.trim() || null,
+    }).eq("id", id);
+    setSavingEdit(false);
+    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    setEditingId(null);
+    await loadEntries();
+  };
+
+  const handleDelete = async (entry) => {
+    if (!window.confirm(`Remover "${entry.display_name}" do ranking?`)) return;
+    const { error } = await supabase.from("trader_rankings").delete().eq("id", entry.id);
+    if (error) { alert("Não consegui remover: " + error.message); return; }
+    await loadEntries();
+  };
+
+  const medalFor = (position) => {
+    if (position === 1) return "🥇";
+    if (position === 2) return "🥈";
+    if (position === 3) return "🥉";
+    return null;
+  };
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Ranking</h1><p className="tf-muted">Os melhores traders em destaque</p></div>
+      </div>
+
+      <div className="tf-card">
+        {loading ? (
+          <p className="tf-muted" style={{ textAlign: "center", padding: 20 }}>Carregando...</p>
+        ) : entries.length === 0 ? (
+          <p className="tf-muted" style={{ textAlign: "center", padding: 20, fontSize: 13.5 }}>Ranking ainda não tem ninguém cadastrado.</p>
+        ) : (
+          <div className="tf-ranking-list">
+            {entries.map((e) => (
+              editingId === e.id ? (
+                <div className="tf-mentor-edit-row" key={e.id}>
+                  <div className="tf-form-row-inline">
+                    <input value={editPosition} onChange={(ev) => setEditPosition(ev.target.value)} placeholder="Posição" inputMode="numeric" />
+                    <input value={editName} onChange={(ev) => setEditName(ev.target.value)} placeholder="Nome" />
+                  </div>
+                  <input value={editScoreText} onChange={(ev) => setEditScoreText(ev.target.value)} placeholder="Ex: 94% de acerto" />
+                  <input value={editSubtitle} onChange={(ev) => setEditSubtitle(ev.target.value)} placeholder="Subtítulo (opcional, ex: Trader de Forex)" />
+                  <div className="tf-mentor-edit-actions">
+                    <button type="button" className="tf-btn-primary" onClick={() => saveEdit(e.id)} disabled={savingEdit}>{savingEdit ? "Salvando..." : "Salvar"}</button>
+                    <button type="button" className="tf-btn-outline" onClick={cancelEdit}>Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="tf-ranking-row" key={e.id}>
+                  <span className="tf-ranking-position">{medalFor(e.position) || `#${e.position}`}</span>
+                  <div className="tf-ranking-info">
+                    <span className="tf-ranking-name">{e.display_name}</span>
+                    {e.subtitle && <span className="tf-ranking-subtitle">{e.subtitle}</span>}
+                  </div>
+                  {e.score_text && <span className="tf-ranking-score">{e.score_text}</span>}
+                  {isOwner && (
+                    <div className="tf-ranking-actions">
+                      <button type="button" className="tf-row-action" onClick={() => startEdit(e)} title="Editar"><Pencil size={13} /></button>
+                      <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDelete(e)} title="Remover"><Trash2 size={13} /></button>
+                    </div>
+                  )}
+                </div>
+              )
+            ))}
+          </div>
+        )}
+      </div>
+
+      {isOwner && (
+        <div className="tf-card" style={{ marginTop: 20 }}>
+          <div className="tf-card-head"><h3>Adicionar ao ranking</h3></div>
+          <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
+            Só você vê esse painel. Escolhe a posição, o nome e o que quer destacar.
+          </p>
+          <form className="tf-form" onSubmit={handleCreate}>
+            <div className="tf-form-row-inline">
+              <div className="tf-form-row">
+                <label>Posição</label>
+                <input value={newPosition} onChange={(e) => setNewPosition(e.target.value)} placeholder="1" inputMode="numeric" />
+              </div>
+              <div className="tf-form-row">
+                <label>Nome</label>
+                <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nome do trader" />
+              </div>
+            </div>
+            <div className="tf-form-row">
+              <label>Destaque (opcional)</label>
+              <input value={newScoreText} onChange={(e) => setNewScoreText(e.target.value)} placeholder="Ex: 94% de acerto, ou R$ 180 mil em 2026" />
+            </div>
+            <div className="tf-form-row">
+              <label>Subtítulo (opcional)</label>
+              <input value={newSubtitle} onChange={(e) => setNewSubtitle(e.target.value)} placeholder="Ex: Trader de Forex" />
+            </div>
+            <button className="tf-btn-primary tf-form-submit" disabled={creating}>{creating ? "Adicionando..." : "Adicionar ao ranking"}</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TOOL_TABS = [
   { id: "risco", label: "Gerenciamento de Risco", icon: ShieldCheck },
   { id: "impostos", label: "Calculadora de Imposto", icon: Scale },
@@ -3496,6 +3663,7 @@ export default function App() {
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "mentors": return <MentoresView session={session} />;
+      case "ranking": return <RankingView session={session} />;
       case "mindset": return <MindsetView trades={trades} isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
@@ -3723,6 +3891,18 @@ const APP_STYLES = `
   background:var(--surface-2); border:1px solid var(--lime); border-radius:10px; margin-bottom:8px;
 }
 .tf-mentor-edit-actions{display:flex; gap:8px;}
+
+.tf-ranking-list{display:flex; flex-direction:column; gap:8px;}
+.tf-ranking-row{
+  display:flex; align-items:center; gap:14px;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px 16px;
+}
+.tf-ranking-position{font-size:20px; font-weight:800; width:34px; text-align:center; flex-shrink:0; color:var(--muted);}
+.tf-ranking-info{display:flex; flex-direction:column; flex:1; min-width:0;}
+.tf-ranking-name{font-size:14px; font-weight:700; color:var(--text);}
+.tf-ranking-subtitle{font-size:11.5px; color:var(--muted);}
+.tf-ranking-score{font-size:13px; font-weight:700; color:var(--lime); white-space:nowrap;}
+.tf-ranking-actions{display:flex; gap:6px; flex-shrink:0;}
 .tf-mood-pill{
   background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
   font-size:12px;padding:6px 13px;border-radius:20px;cursor:pointer;transition:all .15s;
