@@ -4026,6 +4026,10 @@ function StudentContentManager() {
   const [editCatName, setEditCatName] = useState("");
   const [editCatDesc, setEditCatDesc] = useState("");
   const [uploadCategoryId, setUploadCategoryId] = useState(null);
+  const [editingVideoId, setEditingVideoId] = useState(null);
+  const [editVideoTitle, setEditVideoTitle] = useState("");
+  const [editVideoDesc, setEditVideoDesc] = useState("");
+  const [savingVideo, setSavingVideo] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -4082,6 +4086,25 @@ function StudentContentManager() {
     }
     const { error } = await supabase.from("student_categories").delete().eq("id", cat.id);
     if (error) { alert("Não consegui apagar a categoria: " + error.message); return; }
+    await load();
+  };
+
+  const startEditVideo = (video) => {
+    setEditingVideoId(video.id);
+    setEditVideoTitle(video.title || "");
+    setEditVideoDesc(video.description || "");
+  };
+
+  const saveEditVideo = async (id) => {
+    if (!editVideoTitle.trim()) return;
+    setSavingVideo(true);
+    const { error } = await supabase.from("student_videos").update({
+      title: editVideoTitle.trim(),
+      description: editVideoDesc.trim() || null,
+    }).eq("id", id);
+    setSavingVideo(false);
+    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    setEditingVideoId(null);
     await load();
   };
 
@@ -4167,24 +4190,36 @@ function StudentContentManager() {
                   {catVideos.length > 0 && (
                     <div className="tf-trade-list" style={{ marginTop: 10 }}>
                       {catVideos.map((v) => (
-                        <div key={v.id} className="tf-trade-row">
-                          <div className="tf-category-cover-preview tf-category-cover-preview-sm">
-                            {v.cover_url ? <img src={v.cover_url} alt="" /> : <ImageIcon size={13} className="tf-muted" />}
+                        editingVideoId === v.id ? (
+                          <div key={v.id} className="tf-mentor-edit-row">
+                            <input value={editVideoTitle} onChange={(e) => setEditVideoTitle(e.target.value)} placeholder="Título da aula" />
+                            <textarea className="tf-textarea" rows={2} value={editVideoDesc} onChange={(e) => setEditVideoDesc(e.target.value)} placeholder="Descrição (opcional)" />
+                            <div className="tf-mentor-edit-actions">
+                              <button type="button" className="tf-btn-primary" disabled={savingVideo} onClick={() => saveEditVideo(v.id)}>{savingVideo ? "Salvando..." : "Salvar"}</button>
+                              <button type="button" className="tf-btn-outline" onClick={() => setEditingVideoId(null)}>Cancelar</button>
+                            </div>
                           </div>
-                          <span className="tf-asset" style={{ flex: 1 }}>{v.title}</span>
-                          <span className={`tf-nav-badge ${v.status === "error" ? "tf-badge-error" : ""}`}>
-                            {v.status === "ready" ? "Pronto" : v.status === "error" ? "Erro" : "Processando"}
-                          </span>
-                          <CoverUploadButton
-                            title="Trocar capa do vídeo"
-                            onUploaded={async (url) => {
-                              const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
-                              if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
-                              await load();
-                            }}
-                          />
-                          <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteVideo(v)} title="Apagar"><Trash2 size={13} /></button>
-                        </div>
+                        ) : (
+                          <div key={v.id} className="tf-trade-row">
+                            <div className="tf-category-cover-preview tf-category-cover-preview-sm">
+                              {v.cover_url ? <img src={v.cover_url} alt="" /> : <ImageIcon size={13} className="tf-muted" />}
+                            </div>
+                            <span className="tf-asset" style={{ flex: 1 }}>{v.title}</span>
+                            <span className={`tf-nav-badge ${v.status === "error" ? "tf-badge-error" : ""}`}>
+                              {v.status === "ready" ? "Pronto" : v.status === "error" ? "Erro" : "Processando"}
+                            </span>
+                            <CoverUploadButton
+                              title="Trocar capa do vídeo"
+                              onUploaded={async (url) => {
+                                const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
+                                if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
+                                await load();
+                              }}
+                            />
+                            <button type="button" className="tf-row-action" onClick={() => startEditVideo(v)} title="Editar"><Pencil size={13} /></button>
+                            <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteVideo(v)} title="Apagar"><Trash2 size={13} /></button>
+                          </div>
+                        )
                       ))}
                     </div>
                   )}
@@ -4995,8 +5030,10 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-netflix-row{ display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
 .tf-netflix-row::-webkit-scrollbar{ height:6px; }
 .tf-netflix-row::-webkit-scrollbar-thumb{ background:var(--border); border-radius:10px; }
-.tf-netflix-card{ flex:0 0 180px; scroll-snap-align:start; background:none; border:none; padding:0; text-align:left; cursor:pointer; display:flex; flex-direction:column; gap:6px; }
+.tf-netflix-card{ flex:0 0 180px; scroll-snap-align:start; background:none; border:none; padding:0; text-align:left; cursor:pointer; display:flex; flex-direction:column; gap:6px; color:var(--text); font-family:inherit; }
 .tf-netflix-card:disabled{ cursor:default; }
+.tf-netflix-info .tf-video-title{ color:var(--text); }
+.tf-netflix-info .tf-video-status{ color:var(--muted); }
 .tf-netflix-poster{ position:relative; aspect-ratio:16/9; border-radius:10px; overflow:hidden; background:linear-gradient(135deg,#152033,#0c1420); border:1px solid var(--border); transition:border-color .15s, transform .15s; }
 .tf-netflix-card:not(:disabled):hover .tf-netflix-poster{ border-color:var(--lime); transform:translateY(-2px); }
 .tf-netflix-poster img{ width:100%; height:100%; object-fit:cover; display:block; }
