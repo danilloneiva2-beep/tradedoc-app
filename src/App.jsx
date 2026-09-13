@@ -124,14 +124,9 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
 
 const MENTOR_OWNER_EMAIL = "prosolucoeseducacionais@gmail.com";
 
-const MENTOR_BETA_TESTERS = [
-  "prosolucoeseducacionais@gmail.com",
-  "emmanuellelazzarotti@hotmail.com",
-  "danilloneiva2@gmail.com",
-];
-
-function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, hasStudentPanelAccess }) {
-  const isMentorBetaTester = MENTOR_BETA_TESTERS.includes((userEmail || "").toLowerCase());
+// Quem vê a aba "Mentores" (beta) não é mais uma lista fixa aqui no código —
+// é a coluna profiles.is_mentor_beta, controlada pelo banco de dados.
+function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, hasStudentPanelAccess, isMentorBetaTester }) {
   const isOwnerAccount = (userEmail || "").toLowerCase() === MENTOR_OWNER_EMAIL;
 
   const items = [
@@ -1219,6 +1214,129 @@ function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount
   );
 }
 
+function MfaEnrollCard() {
+  const [loading, setLoading] = useState(true);
+  const [factor, setFactor] = useState(null); // fator TOTP já verificado, se existir
+  const [enrolling, setEnrolling] = useState(false);
+  const [pendingFactorId, setPendingFactorId] = useState(null);
+  const [qrCode, setQrCode] = useState("");
+  const [secret, setSecret] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const loadFactors = async () => {
+    setLoading(true);
+    const { data } = await supabase.auth.mfa.listFactors();
+    setFactor((data?.totp || []).find((f) => f.status === "verified") || null);
+    setLoading(false);
+  };
+
+  useEffect(() => { loadFactors(); }, []);
+
+  const startEnroll = async () => {
+    setMsg("");
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp" });
+    if (error) { setMsg("error:" + error.message); return; }
+    setPendingFactorId(data.id);
+    setQrCode(data.totp.qr_code);
+    setSecret(data.totp.secret);
+    setEnrolling(true);
+  };
+
+  const cancelEnroll = async () => {
+    if (pendingFactorId) await supabase.auth.mfa.unenroll({ factorId: pendingFactorId });
+    setEnrolling(false);
+    setPendingFactorId(null);
+    setQrCode("");
+    setSecret("");
+    setCode("");
+    setMsg("");
+  };
+
+  const confirmEnroll = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setMsg("");
+    try {
+      const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: pendingFactorId });
+      if (challengeError) throw challengeError;
+      const { error: verifyError } = await supabase.auth.mfa.verify({
+        factorId: pendingFactorId,
+        challengeId: challenge.id,
+        code: code.trim(),
+      });
+      if (verifyError) throw verifyError;
+      setEnrolling(false);
+      setPendingFactorId(null);
+      setQrCode("");
+      setSecret("");
+      setCode("");
+      setMsg("ok:Autenticação em duas etapas ativada!");
+      await loadFactors();
+    } catch (err) {
+      setMsg("error:" + (err.message || "Código inválido."));
+    }
+    setBusy(false);
+  };
+
+  const removeFactor = async () => {
+    if (!factor) return;
+    if (!window.confirm("Desativar a autenticação em duas etapas dessa conta?")) return;
+    setBusy(true);
+    const { error } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+    setBusy(false);
+    if (error) { setMsg("error:" + error.message); return; }
+    setMsg("");
+    await loadFactors();
+  };
+
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Autenticação em duas etapas</h3></div>
+      <p className="tf-muted" style={{ marginBottom: 14 }}>
+        Adiciona uma segunda trava no seu login, além da senha: um código de 6 dígitos gerado por um app autenticador (Google Authenticator, Authy, etc). Recomendado principalmente pra conta que gerencia o conteúdo pago.
+      </p>
+
+      {loading ? (
+        <p className="tf-muted" style={{ fontSize: 13 }}>Carregando...</p>
+      ) : factor ? (
+        <>
+          <p className="text-lime" style={{ fontSize: 13, marginBottom: 12 }}>✓ Ativada</p>
+          <button type="button" className="tf-btn-outline" onClick={removeFactor} disabled={busy}>Desativar</button>
+        </>
+      ) : !enrolling ? (
+        <button type="button" className="tf-btn-primary" onClick={startEnroll}>Ativar autenticação em duas etapas</button>
+      ) : (
+        <form className="tf-form" onSubmit={confirmEnroll}>
+          <p className="tf-muted" style={{ fontSize: 12.5 }}>
+            1. Escaneia esse código com o app autenticador no seu celular:
+          </p>
+          {qrCode && (
+            <img
+              src={`data:image/svg+xml;utf8,${encodeURIComponent(qrCode)}`}
+              alt="QR code de autenticação"
+              style={{ width: 180, height: 180, background: "#fff", borderRadius: 8, padding: 8 }}
+            />
+          )}
+          <p className="tf-muted" style={{ fontSize: 11.5 }}>
+            Não consegue escanear? Digite esse código manualmente no app: <span className="tf-mono">{secret}</span>
+          </p>
+          <div className="tf-form-row">
+            <label>2. Digite o código de 6 dígitos que apareceu no app</label>
+            <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} placeholder="000000" inputMode="numeric" maxLength={6} required />
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button type="submit" className="tf-btn-primary" disabled={busy || code.length < 6}>{busy ? "Confirmando..." : "Confirmar e ativar"}</button>
+            <button type="button" className="tf-btn-outline" onClick={cancelEnroll}>Cancelar</button>
+          </div>
+        </form>
+      )}
+      {msg && <p className={msg.startsWith("ok:") ? "text-lime" : "text-coral"} style={{ fontSize: 12.5, marginTop: 12 }}>{msg.split(":").slice(1).join(":")}</p>}
+    </div>
+  );
+}
+
 function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateCurrency, currentPlan, setActive, onLogout, theme, onToggleTheme }) {
   const [name, setName] = useState(userName);
   const [savedMsg, setSavedMsg] = useState(false);
@@ -1267,6 +1385,7 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateC
               </div>
             </form>
           </div>
+          <MfaEnrollCard />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div className="tf-card">
@@ -2884,11 +3003,11 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
   );
 }
 
-function MentoresView({ session }) {
+function MentoresView({ session, isMentorBetaTester }) {
   const [mentors, setMentors] = useState([]);
   const [loadingMentors, setLoadingMentors] = useState(true);
 
-  const isBetaTester = MENTOR_BETA_TESTERS.includes((session?.user?.email || "").toLowerCase());
+  const isBetaTester = isMentorBetaTester;
 
   const loadMentors = async () => {
     setLoadingMentors(true);
@@ -3315,6 +3434,68 @@ function ResetPasswordScreen({ onDone }) {
   );
 }
 
+function MfaChallengeScreen({ onVerified, onLogout }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const { data: factorsData, error: listError } = await supabase.auth.mfa.listFactors();
+      if (listError) throw listError;
+      const factor = (factorsData?.totp || []).find((f) => f.status === "verified");
+      if (!factor) throw new Error("Nenhum fator de autenticação encontrado nessa conta.");
+      const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: factor.id });
+      if (challengeError) throw challengeError;
+      const { error: verifyError } = await supabase.auth.mfa.verify({
+        factorId: factor.id,
+        challengeId: challenge.id,
+        code: code.trim(),
+      });
+      if (verifyError) throw verifyError;
+      onVerified();
+    } catch (err) {
+      setError(err.message || "Código inválido. Tenta de novo.");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="tf-auth-screen">
+      <div className="tf-auth-card">
+        <div className="tf-brand tf-brand-center"><div className="tf-brand-name tf-brand-name-lg">TRADE<span className="text-lime">FY</span></div></div>
+        <h2 className="tf-onboarding-title" style={{ marginTop: 8 }}>Verificação em duas etapas</h2>
+        <p className="tf-muted" style={{ fontSize: 12.5, textAlign: "center", margin: "-6px 0 14px" }}>
+          Digite o código de 6 dígitos do seu aplicativo autenticador (Google Authenticator, Authy, etc).
+        </p>
+        <form className="tf-form" onSubmit={submit}>
+          <div className="tf-form-row">
+            <label>Código</label>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              placeholder="000000"
+              inputMode="numeric"
+              maxLength={6}
+              required
+              autoFocus
+              style={{ letterSpacing: 4, textAlign: "center", fontSize: 20 }}
+            />
+          </div>
+          {error && <p className="text-coral" style={{ fontSize: 12.5, margin: 0 }}>{error}</p>}
+          <button type="submit" className="tf-btn-primary tf-form-submit" disabled={loading || code.length < 6}>
+            {loading ? "Verificando..." : "Confirmar"} <ArrowRight size={15} />
+          </button>
+        </form>
+        <button className="tf-skip-link" onClick={onLogout}>← Sair e entrar com outra conta</button>
+      </div>
+    </div>
+  );
+}
+
 function OnboardingScreen({ onComplete }) {
   const [name, setName] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -3491,6 +3672,20 @@ export default function App() {
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  // Se essa conta tem autenticação em duas etapas ativada, o login por senha
+  // sozinho não é suficiente — precisa confirmar o código do app autenticador
+  // antes de liberar qualquer tela do Tradefy.
+  const [checkingMfa, setCheckingMfa] = useState(true);
+  const [mfaNeeded, setMfaNeeded] = useState(false);
+  useEffect(() => {
+    if (!session) { setMfaNeeded(false); setCheckingMfa(false); return; }
+    setCheckingMfa(true);
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(({ data }) => {
+      setMfaNeeded(!!data && data.nextLevel === "aal2" && data.nextLevel !== data.currentLevel);
+      setCheckingMfa(false);
+    });
+  }, [session]);
 
   useEffect(() => {
     if (!session) { setProfile(null); setAccounts([]); setTrades([]); setLoadingUserData(false); return; }
@@ -3699,6 +3894,7 @@ export default function App() {
   // Acesso ao Painel do Aluno = o dono do app (sempre, pra gerenciar o conteúdo)
   // OU um aluno que o dono liberou manualmente E que tem assinatura Tradefy ativa.
   const hasStudentPanelAccess = isOwnerAccount || (!!studentAccess && hasActiveAccess);
+  const isMentorBetaTester = !!profile?.is_mentor_beta;
 
   const view = (() => {
     switch (active) {
@@ -3706,7 +3902,7 @@ export default function App() {
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
       case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
-      case "mentors": return <MentoresView session={session} />;
+      case "mentors": return <MentoresView session={session} isMentorBetaTester={isMentorBetaTester} />;
       case "ranking": return <RankingView session={session} />;
       case "mindset": return <MindsetView trades={trades} isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
@@ -3729,11 +3925,15 @@ export default function App() {
       ) : (
         <>
           {!session && <LoginScreen />}
-          {session && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
-          {session && profile && !hasActiveAccess && (
+          {session && checkingMfa && <LoadingScreen />}
+          {session && !checkingMfa && mfaNeeded && (
+            <MfaChallengeScreen onVerified={() => setMfaNeeded(false)} onLogout={handleLogout} />
+          )}
+          {session && !checkingMfa && !mfaNeeded && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
+          {session && !checkingMfa && !mfaNeeded && profile && !hasActiveAccess && (
             <AccessPendingScreen onLogout={handleLogout} onRefresh={loadUserData} />
           )}
-          {session && profile && hasActiveAccess && (
+          {session && !checkingMfa && !mfaNeeded && profile && hasActiveAccess && (
             <>
               <div className="tf-mobile-topbar">
                 <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)}><Menu size={20} /></button>
@@ -3748,6 +3948,7 @@ export default function App() {
             mobileOpen={mobileNavOpen}
             onClose={() => setMobileNavOpen(false)}
             hasStudentPanelAccess={hasStudentPanelAccess}
+            isMentorBetaTester={isMentorBetaTester}
           />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
