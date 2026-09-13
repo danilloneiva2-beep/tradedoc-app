@@ -12,7 +12,7 @@ import {
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
   Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
-  PlayCircle, Search, FolderPlus, UserPlus, UserMinus,
+  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -3783,6 +3783,47 @@ export default function App() {
 
 const BUNNY_TUS_ENDPOINT = "https://video.bunnycdn.com/tusupload";
 
+// Capas de categoria/vídeo — bucket público (só o dono pode enviar/apagar,
+// via RLS no storage.objects; qualquer um pode ver a imagem, já que é só
+// uma capa ilustrativa, não o conteúdo do vídeo em si).
+async function uploadCoverImage(file) {
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from("student-covers").upload(path, file, { upsert: false });
+  if (error) throw error;
+  const { data } = supabase.storage.from("student-covers").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+function CoverUploadButton({ onUploaded, title = "Trocar capa", className = "tf-row-action" }) {
+  const [uploading, setUploading] = useState(false);
+  const inputId = useRef(`tf-cover-${Math.random().toString(36).slice(2)}`).current;
+
+  const handleChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert("Imagem muito grande — o limite é 5MB."); e.target.value = ""; return; }
+    setUploading(true);
+    try {
+      const url = await uploadCoverImage(file);
+      await onUploaded(url);
+    } catch (err) {
+      alert("Não consegui subir a imagem: " + (err.message || "erro desconhecido"));
+    }
+    setUploading(false);
+    e.target.value = "";
+  };
+
+  return (
+    <>
+      <input type="file" id={inputId} accept="image/*" onChange={handleChange} style={{ display: "none" }} />
+      <label htmlFor={inputId} className={className} title={title} style={{ cursor: "pointer" }}>
+        {uploading ? <Loader2 size={13} className="tf-spin" /> : <ImageIcon size={13} />}
+      </label>
+    </>
+  );
+}
+
 function StudentPanelView({ session, isOwnerAccount }) {
   const [tab, setTab] = useState(isOwnerAccount ? "conteudo" : "aulas");
 
@@ -3859,17 +3900,24 @@ function StudentLessonsList({ isOwnerAccount }) {
   }
 
   return (
-    <div>
+    <div className="tf-netflix">
       {visibleCategories.map((cat) => {
         const catVideos = videos.filter((v) => v.category_id === cat.id && (isOwnerAccount || v.status === "ready"));
         return (
-          <div key={cat.id} className="tf-card" style={{ marginBottom: 18 }}>
-            <div className="tf-card-head"><h3>{cat.name}</h3></div>
-            {cat.description && <p className="tf-muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>{cat.description}</p>}
+          <div key={cat.id} className="tf-netflix-section">
+            <div className={`tf-category-banner ${cat.cover_url ? "" : "tf-category-banner-empty"}`}>
+              {cat.cover_url && <img src={cat.cover_url} alt="" />}
+              <div className="tf-category-banner-overlay">
+                <div>
+                  <h3>{cat.name}</h3>
+                  {cat.description && <p>{cat.description}</p>}
+                </div>
+              </div>
+            </div>
             {catVideos.length === 0 ? (
               <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum vídeo nessa categoria ainda.</p>
             ) : (
-              <div className="tf-video-grid">
+              <div className="tf-netflix-row">
                 {catVideos.map((v) => (
                   <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
                 ))}
@@ -3888,14 +3936,28 @@ function VideoCard({ video, onPlay }) {
   return (
     <button
       type="button"
-      className={`tf-video-card ${!isReady ? "tf-video-card-disabled" : ""}`}
+      className={`tf-netflix-card ${!isReady ? "tf-video-card-disabled" : ""}`}
       onClick={isReady ? onPlay : undefined}
       disabled={!isReady}
     >
-      <div className="tf-video-thumb">
-        {isReady ? <PlayCircle size={34} /> : <Loader2 size={26} className="tf-spin" />}
+      <div className="tf-netflix-poster">
+        {video.cover_url ? (
+          <img src={video.cover_url} alt="" />
+        ) : (
+          <div className="tf-netflix-poster-fallback">
+            {isReady ? <PlayCircle size={30} /> : <Loader2 size={24} className="tf-spin" />}
+          </div>
+        )}
+        {isReady && video.cover_url && (
+          <div className="tf-play-overlay"><PlayCircle size={34} /></div>
+        )}
+        {!isReady && video.cover_url && (
+          <div className="tf-play-overlay" style={{ opacity: 1, background: "rgba(10,14,20,0.55)" }}>
+            <Loader2 size={24} className="tf-spin" />
+          </div>
+        )}
       </div>
-      <div className="tf-video-info">
+      <div className="tf-netflix-info">
         <span className="tf-video-title">{video.title}</span>
         {!isReady && (
           <span className="tf-video-status">{video.status === "error" ? "Erro no processamento" : "Processando..."}</span>
@@ -4075,11 +4137,22 @@ function StudentContentManager() {
                     </div>
                   ) : (
                     <div className="tf-category-header">
-                      <div>
+                      <div className="tf-category-cover-preview">
+                        {cat.cover_url ? <img src={cat.cover_url} alt="" /> : <ImageIcon size={16} className="tf-muted" />}
+                      </div>
+                      <div style={{ flex: 1 }}>
                         <span className="tf-asset">{cat.name}</span>
                         {cat.description && <p className="tf-muted" style={{ fontSize: 12, margin: "2px 0 0" }}>{cat.description}</p>}
                       </div>
                       <div className="tf-ranking-actions">
+                        <CoverUploadButton
+                          title="Trocar capa da categoria"
+                          onUploaded={async (url) => {
+                            const { error } = await supabase.from("student_categories").update({ cover_url: url }).eq("id", cat.id);
+                            if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
+                            await load();
+                          }}
+                        />
                         <button type="button" className="tf-row-action" onClick={() => setUploadCategoryId(uploadCategoryId === cat.id ? null : cat.id)} title="Adicionar vídeo"><Upload size={13} /></button>
                         <button type="button" className="tf-row-action" onClick={() => startEditCategory(cat)} title="Editar"><Pencil size={13} /></button>
                         <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteCategory(cat)} title="Apagar"><Trash2 size={13} /></button>
@@ -4095,10 +4168,21 @@ function StudentContentManager() {
                     <div className="tf-trade-list" style={{ marginTop: 10 }}>
                       {catVideos.map((v) => (
                         <div key={v.id} className="tf-trade-row">
+                          <div className="tf-category-cover-preview tf-category-cover-preview-sm">
+                            {v.cover_url ? <img src={v.cover_url} alt="" /> : <ImageIcon size={13} className="tf-muted" />}
+                          </div>
                           <span className="tf-asset" style={{ flex: 1 }}>{v.title}</span>
                           <span className={`tf-nav-badge ${v.status === "error" ? "tf-badge-error" : ""}`}>
                             {v.status === "ready" ? "Pronto" : v.status === "error" ? "Erro" : "Processando"}
                           </span>
+                          <CoverUploadButton
+                            title="Trocar capa do vídeo"
+                            onUploaded={async (url) => {
+                              const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
+                              if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
+                              await load();
+                            }}
+                          />
                           <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteVideo(v)} title="Apagar"><Trash2 size={13} /></button>
                         </div>
                       ))}
@@ -4876,7 +4960,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-video-status{ font-size:11px; color:var(--muted); }
 .tf-category-block{ padding:14px 0; border-bottom:1px solid var(--border); }
 .tf-category-block:last-child{ border-bottom:none; }
-.tf-category-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.tf-category-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .tf-video-upload-form{ margin:14px 0 4px; padding:14px; background:var(--surface-2); border-radius:10px; border:1px solid var(--border); }
 .tf-upload-progress{ position:relative; height:22px; background:var(--surface-2); border-radius:6px; overflow:hidden; margin:8px 0; border:1px solid var(--border); }
 .tf-upload-progress-bar{ position:absolute; inset:0 auto 0 0; background:var(--lime); transition:width .2s; }
@@ -4888,5 +4972,39 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 
 @media (max-width: 640px) {
   .tf-video-grid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
+}
+
+/* ------------------------- Painel do Aluno estilo Netflix ------------------------- */
+.tf-netflix-section{ margin-bottom: 28px; }
+.tf-category-banner{ position:relative; border-radius:14px; overflow:hidden; margin-bottom:14px; aspect-ratio:21/6; background:linear-gradient(135deg,#152033,#0c1420); }
+.tf-category-banner-empty{ aspect-ratio:auto; padding:16px 18px; background:linear-gradient(135deg,#152033,#0c1420); }
+.tf-category-banner img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.tf-category-banner-overlay{ position:relative; z-index:1; display:flex; align-items:flex-end; height:100%; padding:16px 18px; background:linear-gradient(to top, rgba(5,8,14,0.85), rgba(5,8,14,0.05) 65%); }
+.tf-category-banner-empty .tf-category-banner-overlay{ position:static; background:none; padding:0; height:auto; align-items:flex-start; }
+.tf-category-banner-overlay h3{ font-family:'Exo 2',sans-serif; font-size:16px; margin:0 0 2px; color:#fff; }
+.tf-category-banner-empty .tf-category-banner-overlay h3{ color:var(--text); }
+.tf-category-banner-overlay p{ font-size:12px; margin:0; color:rgba(255,255,255,0.8); max-width:520px; }
+.tf-category-banner-empty .tf-category-banner-overlay p{ color:var(--muted); }
+
+.tf-netflix-row{ display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
+.tf-netflix-row::-webkit-scrollbar{ height:6px; }
+.tf-netflix-row::-webkit-scrollbar-thumb{ background:var(--border); border-radius:10px; }
+.tf-netflix-card{ flex:0 0 180px; scroll-snap-align:start; background:none; border:none; padding:0; text-align:left; cursor:pointer; display:flex; flex-direction:column; gap:6px; }
+.tf-netflix-card:disabled{ cursor:default; }
+.tf-netflix-poster{ position:relative; aspect-ratio:16/9; border-radius:10px; overflow:hidden; background:linear-gradient(135deg,#152033,#0c1420); border:1px solid var(--border); transition:border-color .15s, transform .15s; }
+.tf-netflix-card:not(:disabled):hover .tf-netflix-poster{ border-color:var(--lime); transform:translateY(-2px); }
+.tf-netflix-poster img{ width:100%; height:100%; object-fit:cover; display:block; }
+.tf-netflix-poster-fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--lime); }
+.tf-play-overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.15); opacity:0; color:#fff; transition:opacity .15s; }
+.tf-netflix-card:not(:disabled):hover .tf-play-overlay{ opacity:1; background:rgba(0,0,0,0.4); }
+.tf-netflix-info{ padding:0 1px; }
+
+.tf-category-cover-preview{ width:40px; height:40px; border-radius:8px; overflow:hidden; background:var(--surface-2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.tf-category-cover-preview img{ width:100%; height:100%; object-fit:cover; display:block; }
+.tf-category-cover-preview-sm{ width:30px; height:30px; border-radius:6px; }
+
+@media (max-width: 640px) {
+  .tf-netflix-card{ flex-basis:130px; }
+  .tf-category-banner{ aspect-ratio:16/7; }
 }
 `;
