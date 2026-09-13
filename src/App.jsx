@@ -4331,6 +4331,11 @@ function StudentAccessManager() {
   const [granted, setGranted] = useState([]);
   const [loadingGranted, setLoadingGranted] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [categories, setCategories] = useState([]);
+
+  const [pickerUserId, setPickerUserId] = useState(null);
+  const [pickerFullAccess, setPickerFullAccess] = useState(true);
+  const [pickerSelectedIds, setPickerSelectedIds] = useState([]);
 
   const loadGranted = async () => {
     setLoadingGranted(true);
@@ -4339,7 +4344,12 @@ function StudentAccessManager() {
     setLoadingGranted(false);
   };
 
-  useEffect(() => { loadGranted(); }, []);
+  const loadCategories = async () => {
+    const { data } = await supabase.from("student_categories").select("id, name").order("position", { ascending: true });
+    setCategories(data || []);
+  };
+
+  useEffect(() => { loadGranted(); loadCategories(); }, []);
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -4351,31 +4361,94 @@ function StudentAccessManager() {
     setResults(data?.results || []);
   };
 
-  const handleGrant = async (userId) => {
+  const categoryNamesFor = (categoryIds) => {
+    if (!categoryIds || categoryIds.length === 0) return null;
+    return categoryIds
+      .map((id) => categories.find((c) => c.id === id)?.name)
+      .filter(Boolean)
+      .join(", ");
+  };
+
+  const openPicker = (userId) => {
+    const current = granted.find((g) => g.id === userId);
+    const currentIds = current?.categoryIds || [];
+    setPickerUserId(userId);
+    setPickerFullAccess(currentIds.length === 0);
+    setPickerSelectedIds(currentIds);
+  };
+
+  const closePicker = () => {
+    setPickerUserId(null);
+    setPickerFullAccess(true);
+    setPickerSelectedIds([]);
+  };
+
+  const toggleCategoryInPicker = (categoryId) => {
+    setPickerSelectedIds((ids) => (ids.includes(categoryId) ? ids.filter((id) => id !== categoryId) : [...ids, categoryId]));
+  };
+
+  const confirmPicker = async (userId) => {
+    if (!pickerFullAccess && pickerSelectedIds.length === 0) {
+      alert("Marque \"Acesso completo\" ou escolha pelo menos uma categoria.");
+      return;
+    }
     setBusyId(userId);
-    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "grant-access", userId } });
+    const { data, error } = await supabase.functions.invoke("bunny-stream", {
+      body: { action: "grant-access", userId, categoryIds: pickerFullAccess ? [] : pickerSelectedIds },
+    });
     setBusyId(null);
     if (error || data?.error) { alert("Não consegui liberar o acesso: " + (data?.error || error.message)); return; }
+    closePicker();
     await loadGranted();
     setResults((r) => r.map((u) => (u.id === userId ? { ...u, hasAccess: true } : u)));
   };
 
   const handleRevoke = async (userId) => {
-    if (!window.confirm("Remover o acesso desse aluno ao Painel do Aluno?")) return;
+    if (!window.confirm("Remover TODO o acesso desse aluno ao Painel do Aluno (inclusive as categorias liberadas)?")) return;
     setBusyId(userId);
     const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "revoke-access", userId } });
     setBusyId(null);
     if (error || data?.error) { alert("Não consegui remover o acesso: " + (data?.error || error.message)); return; }
+    if (pickerUserId === userId) closePicker();
     await loadGranted();
     setResults((r) => r.map((u) => (u.id === userId ? { ...u, hasAccess: false } : u)));
   };
+
+  const renderPicker = (userId) => (
+    <div className="tf-category-picker">
+      <label className="tf-category-picker-option">
+        <input type="checkbox" checked={pickerFullAccess} onChange={(e) => setPickerFullAccess(e.target.checked)} />
+        <span>Acesso completo (todas as categorias, inclusive as futuras)</span>
+      </label>
+      {!pickerFullAccess && (
+        categories.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 12, margin: "6px 0" }}>Nenhuma categoria criada ainda em "Gerenciar conteúdo".</p>
+        ) : (
+          <div className="tf-category-picker-list">
+            {categories.map((c) => (
+              <label key={c.id} className="tf-category-picker-option">
+                <input type="checkbox" checked={pickerSelectedIds.includes(c.id)} onChange={() => toggleCategoryInPicker(c.id)} />
+                <span>{c.name}</span>
+              </label>
+            ))}
+          </div>
+        )
+      )}
+      <div className="tf-mentor-edit-actions">
+        <button type="button" className="tf-btn-primary" disabled={busyId === userId} onClick={() => confirmPicker(userId)}>
+          <Check size={13} /> {busyId === userId ? "Salvando..." : "Confirmar"}
+        </button>
+        <button type="button" className="tf-btn-outline" onClick={closePicker}><X size={13} /> Cancelar</button>
+      </div>
+    </div>
+  );
 
   return (
     <div>
       <div className="tf-card" style={{ marginBottom: 20 }}>
         <div className="tf-card-head"><h3>Buscar aluno</h3></div>
         <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
-          Busque pelo nome ou e-mail do aluno já cadastrado no Tradefy pra liberar o acesso ao Painel do Aluno.
+          Busque pelo nome ou e-mail do aluno já cadastrado no Tradefy pra liberar o acesso ao Painel do Aluno — pode ser a todas as categorias ou só a categorias específicas.
         </p>
         <form onSubmit={handleSearch} style={{ display: "flex", gap: 10, marginBottom: 14 }}>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nome ou e-mail do aluno" style={{ flex: 1, fontSize: 16 }} />
@@ -4387,22 +4460,28 @@ function StudentAccessManager() {
         {results.length > 0 && (
           <div className="tf-trade-list">
             {results.map((u) => (
-              <div key={u.id} className="tf-trade-row">
-                <div style={{ flex: 1 }}>
-                  <span className="tf-asset">{u.name || "(sem nome)"}</span>
-                  <p className="tf-muted" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{u.email}</p>
+              <React.Fragment key={u.id}>
+                <div className="tf-trade-row">
+                  <div style={{ flex: 1 }}>
+                    <span className="tf-asset">{u.name || "(sem nome)"}</span>
+                    <p className="tf-muted" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{u.email}</p>
+                  </div>
+                  {!u.hasActiveSubscription && <span className="tf-nav-badge tf-badge-error">Sem assinatura ativa</span>}
+                  {u.hasAccess ? (
+                    <>
+                      <button type="button" className="tf-row-action" onClick={() => (pickerUserId === u.id ? closePicker() : openPicker(u.id))} title="Editar categorias liberadas"><Pencil size={13} /></button>
+                      <button type="button" className="tf-btn-outline" onClick={() => handleRevoke(u.id)} disabled={busyId === u.id}>
+                        <UserMinus size={13} /> Remover acesso
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="tf-btn-primary" onClick={() => (pickerUserId === u.id ? closePicker() : openPicker(u.id))}>
+                      <UserPlus size={13} /> Liberar acesso
+                    </button>
+                  )}
                 </div>
-                {!u.hasActiveSubscription && <span className="tf-nav-badge tf-badge-error">Sem assinatura ativa</span>}
-                {u.hasAccess ? (
-                  <button type="button" className="tf-btn-outline" onClick={() => handleRevoke(u.id)} disabled={busyId === u.id}>
-                    <UserMinus size={13} /> Remover acesso
-                  </button>
-                ) : (
-                  <button type="button" className="tf-btn-primary" onClick={() => handleGrant(u.id)} disabled={busyId === u.id}>
-                    <UserPlus size={13} /> Liberar acesso
-                  </button>
-                )}
-              </div>
+                {pickerUserId === u.id && renderPicker(u.id)}
+              </React.Fragment>
             ))}
           </div>
         )}
@@ -4417,14 +4496,21 @@ function StudentAccessManager() {
         ) : (
           <div className="tf-trade-list">
             {granted.map((u) => (
-              <div key={u.id} className="tf-trade-row">
-                <div style={{ flex: 1 }}>
-                  <span className="tf-asset">{u.name || "(sem nome)"}</span>
-                  <p className="tf-muted" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{u.email}</p>
+              <React.Fragment key={u.id}>
+                <div className="tf-trade-row">
+                  <div style={{ flex: 1 }}>
+                    <span className="tf-asset">{u.name || "(sem nome)"}</span>
+                    <p className="tf-muted" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{u.email}</p>
+                    <p className="tf-muted" style={{ fontSize: 11, margin: "2px 0 0" }}>
+                      {categoryNamesFor(u.categoryIds) ? `Categorias liberadas: ${categoryNamesFor(u.categoryIds)}` : "Acesso completo (todas as categorias)"}
+                    </p>
+                  </div>
+                  {!u.hasActiveSubscription && <span className="tf-nav-badge tf-badge-error">Assinatura inativa</span>}
+                  <button type="button" className="tf-row-action" onClick={() => (pickerUserId === u.id ? closePicker() : openPicker(u.id))} title="Editar categorias liberadas"><Pencil size={13} /></button>
+                  <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleRevoke(u.id)} title="Remover acesso"><Trash2 size={13} /></button>
                 </div>
-                {!u.hasActiveSubscription && <span className="tf-nav-badge tf-badge-error">Assinatura inativa</span>}
-                <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleRevoke(u.id)} title="Remover acesso"><Trash2 size={13} /></button>
-              </div>
+                {pickerUserId === u.id && renderPicker(u.id)}
+              </React.Fragment>
             ))}
           </div>
         )}
@@ -4592,6 +4678,14 @@ const APP_STYLES = `
   background:var(--surface-2); border:1px solid var(--lime); border-radius:10px; margin-bottom:8px;
 }
 .tf-mentor-edit-actions{display:flex; gap:8px;}
+
+.tf-category-picker{
+  display:flex; flex-direction:column; gap:8px; padding:12px 14px;
+  background:var(--surface-2); border:1px solid var(--lime); border-radius:10px; margin:-2px 0 10px;
+}
+.tf-category-picker-list{ display:flex; flex-direction:column; gap:6px; padding:4px 0 2px 22px; }
+.tf-category-picker-option{ display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+.tf-category-picker-option input{ width:15px; height:15px; flex-shrink:0; accent-color:var(--lime); cursor:pointer; }
 
 .tf-ranking-list{display:flex; flex-direction:column; gap:8px;}
 .tf-ranking-row{
