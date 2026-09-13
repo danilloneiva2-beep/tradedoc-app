@@ -3603,7 +3603,7 @@ export default function App() {
   };
 
   const handleUpdateTrade = async (original, updated) => {
-    const { error: tradeError } = await supabase.from("trades").update(updated).eq("id", original.id);
+    const { error: tradeError } = await supabase.from("trades").update(updated).eq("id", original.id).eq("user_id", session.user.id);
     if (tradeError) return reportError(tradeError, "atualizar o trade");
 
     const oldPnl = Number(original.pnl);
@@ -3622,7 +3622,7 @@ export default function App() {
   };
 
   const handleDeleteTrade = async (trade) => {
-    const { error: delError } = await supabase.from("trades").delete().eq("id", trade.id);
+    const { error: delError } = await supabase.from("trades").delete().eq("id", trade.id).eq("user_id", session.user.id);
     if (delError) return reportError(delError, "apagar o trade");
     if (trade.screenshot_path) await deleteTradeScreenshot(trade.screenshot_path);
     const { error: updError } = await supabase.rpc("increment_balance", { p_account_id: trade.account_id, p_amount: -Number(trade.pnl) });
@@ -3652,7 +3652,7 @@ export default function App() {
   };
 
   const handleUpdateAccount = async (accountId, fields) => {
-    const { error } = await supabase.from("accounts").update(fields).eq("id", accountId);
+    const { error } = await supabase.from("accounts").update(fields).eq("id", accountId).eq("user_id", session.user.id);
     if (error) return reportError(error, "salvar as alterações da conta");
     await loadUserData();
   };
@@ -3660,9 +3660,9 @@ export default function App() {
   const handleDeleteAccount = async (accountId) => {
     // Apaga os trades vinculados primeiro, explicitamente — não depende de
     // nenhuma configuração de cascade lá no banco pra funcionar.
-    const { error: tradesError } = await supabase.from("trades").delete().eq("account_id", accountId);
+    const { error: tradesError } = await supabase.from("trades").delete().eq("account_id", accountId).eq("user_id", session.user.id);
     if (tradesError) return reportError(tradesError, "apagar os trades dessa conta");
-    const { error: accError } = await supabase.from("accounts").delete().eq("id", accountId);
+    const { error: accError } = await supabase.from("accounts").delete().eq("id", accountId).eq("user_id", session.user.id);
     if (accError) return reportError(accError, "apagar a conta");
     await loadUserData();
   };
