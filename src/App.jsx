@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import * as tus from "tus-js-client";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -11,6 +12,7 @@ import {
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
   Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
+  PlayCircle, Search, FolderPlus, UserPlus, UserMinus,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -128,13 +130,14 @@ const MENTOR_BETA_TESTERS = [
   "danilloneiva2@gmail.com",
 ];
 
-function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose }) {
+function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, hasStudentPanelAccess }) {
   const isMentorBetaTester = MENTOR_BETA_TESTERS.includes((userEmail || "").toLowerCase());
   const isOwnerAccount = (userEmail || "").toLowerCase() === MENTOR_OWNER_EMAIL;
 
   const items = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
+    ...(hasStudentPanelAccess ? [{ id: "painel-aluno", label: "Painel do Aluno", icon: PlayCircle }] : []),
     { id: "mindset", label: "Mente de Trader", icon: Brain },
     { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck },
     ...(isMentorBetaTester ? [{ id: "mentors", label: "Mentores", icon: Users, badge: "Beta" }] : []),
@@ -3439,6 +3442,7 @@ export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [trades, setTrades] = useState([]);
   const [subscription, setSubscription] = useState(null);
+  const [studentAccess, setStudentAccess] = useState(null);
   const [active, setActive] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -3515,6 +3519,11 @@ export default function App() {
 
     const { data: subData } = await supabase.from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
     setSubscription(subData || null);
+
+    // Confere se esse aluno tem o Painel do Aluno liberado (independente da
+    // assinatura estar ativa ou não — as duas coisas juntas é que liberam o acesso).
+    const { data: spaData } = await supabase.from("student_panel_access").select("id").eq("user_id", userId).maybeSingle();
+    setStudentAccess(spaData || null);
   }
 
   const filteredAccountObjs = accountFilter.length === 0 ? accounts : accounts.filter((a) => accountFilter.includes(a.id));
@@ -3686,11 +3695,16 @@ export default function App() {
   const hasActiveAccess = subscription?.status === "active";
   const isProPlan = (subscription?.plan || "").toLowerCase().includes("pro");
   const accountLimit = isProPlan ? 5 : 1;
+  const isOwnerAccount = (session?.user?.email || "").toLowerCase() === MENTOR_OWNER_EMAIL;
+  // Acesso ao Painel do Aluno = o dono do app (sempre, pra gerenciar o conteúdo)
+  // OU um aluno que o dono liberou manualmente E que tem assinatura Tradefy ativa.
+  const hasStudentPanelAccess = isOwnerAccount || (!!studentAccess && hasActiveAccess);
 
   const view = (() => {
     switch (active) {
       case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
+      case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "mentors": return <MentoresView session={session} />;
       case "ranking": return <RankingView session={session} />;
@@ -3733,6 +3747,7 @@ export default function App() {
             userEmail={session?.user?.email}
             mobileOpen={mobileNavOpen}
             onClose={() => setMobileNavOpen(false)}
+            hasStudentPanelAccess={hasStudentPanelAccess}
           />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
@@ -3758,6 +3773,543 @@ export default function App() {
       >
         <svg width="26" height="26" viewBox="0 0 24 24" fill="white"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.9C21.96 6.45 17.5 2 12.04 2Zm5.9 14.02c-.25.7-1.45 1.33-2 1.42-.51.08-1.15.11-1.86-.12-.43-.14-.98-.32-1.68-.62-2.96-1.28-4.89-4.26-5.04-4.46-.15-.2-1.21-1.6-1.21-3.06s.77-2.17 1.04-2.47c.27-.3.6-.37.8-.37h.57c.18 0 .43-.07.66.51.25.61.85 2.11.92 2.26.07.15.12.33.02.53-.1.2-.15.32-.3.5-.15.18-.31.4-.44.53-.15.15-.3.31-.13.6.17.3.76 1.26 1.64 2.04 1.13 1.01 2.08 1.32 2.38 1.47.3.15.47.13.65-.08.18-.2.75-.87.95-1.17.2-.3.4-.24.65-.15.27.1 1.71.81 2 .96.3.15.5.22.57.35.08.13.08.75-.17 1.45Z"/></svg>
       </a>
+    </div>
+  );
+}
+
+/* ============================================================================
+   Painel do Aluno — aulas gravadas por categoria, hospedadas no Bunny Stream
+============================================================================ */
+
+const BUNNY_TUS_ENDPOINT = "https://video.bunnycdn.com/tusupload";
+
+function StudentPanelView({ session, isOwnerAccount }) {
+  const [tab, setTab] = useState(isOwnerAccount ? "conteudo" : "aulas");
+
+  if (!isOwnerAccount) {
+    return (
+      <div className="tf-view">
+        <div className="tf-view-header">
+          <div><h1>Painel do Aluno</h1><p className="tf-muted">Suas aulas gravadas, organizadas por categoria</p></div>
+        </div>
+        <StudentLessonsList isOwnerAccount={isOwnerAccount} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="tf-view">
+      <div className="tf-view-header">
+        <div><h1>Painel do Aluno</h1><p className="tf-muted">Suas aulas gravadas, organizadas por categoria</p></div>
+      </div>
+      <div className="tf-subtabs" style={{ marginBottom: 20 }}>
+        <button className={`tf-subtab ${tab === "conteudo" ? "active" : ""}`} onClick={() => setTab("conteudo")}>Gerenciar conteúdo</button>
+        <button className={`tf-subtab ${tab === "alunos" ? "active" : ""}`} onClick={() => setTab("alunos")}>Gerenciar alunos</button>
+        <button className={`tf-subtab ${tab === "aulas" ? "active" : ""}`} onClick={() => setTab("aulas")}>Ver como aluno</button>
+      </div>
+      {tab === "conteudo" && <StudentContentManager />}
+      {tab === "alunos" && <StudentAccessManager />}
+      {tab === "aulas" && <StudentLessonsList isOwnerAccount={isOwnerAccount} />}
+    </div>
+  );
+}
+
+function StudentLessonsList({ isOwnerAccount }) {
+  const [categories, setCategories] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [playingVideo, setPlayingVideo] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data: cats } = await supabase.from("student_categories").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+    const { data: vids } = await supabase.from("student_videos").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+    setCategories(cats || []);
+    setVideos(vids || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  if (loading) return <p className="tf-muted" style={{ textAlign: "center", padding: 30 }}>Carregando aulas...</p>;
+
+  if (categories.length === 0) {
+    return (
+      <div className="tf-card">
+        <p className="tf-muted" style={{ textAlign: "center", padding: 20 }}>
+          {isOwnerAccount
+            ? 'Você ainda não criou nenhuma categoria. Vá em "Gerenciar conteúdo".'
+            : "Ainda não tem aulas disponíveis aqui. Assim que forem publicadas, elas aparecem nessa aba."}
+        </p>
+      </div>
+    );
+  }
+
+  const visibleCategories = categories.filter((cat) => {
+    if (isOwnerAccount) return true;
+    return videos.some((v) => v.category_id === cat.id && v.status === "ready");
+  });
+
+  if (visibleCategories.length === 0) {
+    return (
+      <div className="tf-card">
+        <p className="tf-muted" style={{ textAlign: "center", padding: 20 }}>Ainda não tem aulas disponíveis aqui.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {visibleCategories.map((cat) => {
+        const catVideos = videos.filter((v) => v.category_id === cat.id && (isOwnerAccount || v.status === "ready"));
+        return (
+          <div key={cat.id} className="tf-card" style={{ marginBottom: 18 }}>
+            <div className="tf-card-head"><h3>{cat.name}</h3></div>
+            {cat.description && <p className="tf-muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>{cat.description}</p>}
+            {catVideos.length === 0 ? (
+              <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum vídeo nessa categoria ainda.</p>
+            ) : (
+              <div className="tf-video-grid">
+                {catVideos.map((v) => (
+                  <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {playingVideo && <VideoPlayerModal video={playingVideo} onClose={() => setPlayingVideo(null)} />}
+    </div>
+  );
+}
+
+function VideoCard({ video, onPlay }) {
+  const isReady = video.status === "ready";
+  return (
+    <button
+      type="button"
+      className={`tf-video-card ${!isReady ? "tf-video-card-disabled" : ""}`}
+      onClick={isReady ? onPlay : undefined}
+      disabled={!isReady}
+    >
+      <div className="tf-video-thumb">
+        {isReady ? <PlayCircle size={34} /> : <Loader2 size={26} className="tf-spin" />}
+      </div>
+      <div className="tf-video-info">
+        <span className="tf-video-title">{video.title}</span>
+        {!isReady && (
+          <span className="tf-video-status">{video.status === "error" ? "Erro no processamento" : "Processando..."}</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function VideoPlayerModal({ video, onClose }) {
+  const [embedUrl, setEmbedUrl] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error: fnError } = await supabase.functions.invoke("bunny-stream", {
+        body: { action: "get-playback-url", videoId: video.bunny_video_id },
+      });
+      if (!active) return;
+      if (fnError || !data?.embedUrl) {
+        setError(data?.error || "Não consegui carregar o vídeo. Tenta de novo em instantes.");
+        return;
+      }
+      setEmbedUrl(data.embedUrl);
+    })();
+    return () => { active = false; };
+  }, [video.bunny_video_id]);
+
+  return (
+    <div className="tf-modal-overlay" onClick={onClose}>
+      <div className="tf-modal tf-modal-video" onClick={(e) => e.stopPropagation()}>
+        <div className="tf-modal-head">
+          <h3>{video.title}</h3>
+          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        {error ? (
+          <p className="text-coral" style={{ padding: "10px 0" }}>{error}</p>
+        ) : !embedUrl ? (
+          <p className="tf-muted" style={{ textAlign: "center", padding: 30 }}>Carregando player...</p>
+        ) : (
+          <div className="tf-video-player-wrap">
+            <iframe
+              src={embedUrl}
+              loading="lazy"
+              allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
+              allowFullScreen
+              title={video.title}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StudentContentManager() {
+  const [categories, setCategories] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatDesc, setNewCatDesc] = useState("");
+  const [savingCat, setSavingCat] = useState(false);
+  const [editingCatId, setEditingCatId] = useState(null);
+  const [editCatName, setEditCatName] = useState("");
+  const [editCatDesc, setEditCatDesc] = useState("");
+  const [uploadCategoryId, setUploadCategoryId] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data: cats } = await supabase.from("student_categories").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+    const { data: vids } = await supabase.from("student_videos").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+    setCategories(cats || []);
+    setVideos(vids || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreateCategory = async (e) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    setSavingCat(true);
+    const { error } = await supabase.from("student_categories").insert({
+      name: newCatName.trim(),
+      description: newCatDesc.trim() || null,
+      position: categories.length,
+    });
+    setSavingCat(false);
+    if (error) { alert("Não consegui criar a categoria: " + error.message); return; }
+    setNewCatName(""); setNewCatDesc(""); setShowNewCategory(false);
+    await load();
+  };
+
+  const startEditCategory = (cat) => {
+    setEditingCatId(cat.id);
+    setEditCatName(cat.name);
+    setEditCatDesc(cat.description || "");
+  };
+
+  const saveEditCategory = async (id) => {
+    if (!editCatName.trim()) return;
+    const { error } = await supabase.from("student_categories").update({
+      name: editCatName.trim(),
+      description: editCatDesc.trim() || null,
+    }).eq("id", id);
+    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    setEditingCatId(null);
+    await load();
+  };
+
+  const handleDeleteCategory = async (cat) => {
+    const catVideos = videos.filter((v) => v.category_id === cat.id);
+    if (catVideos.length > 0) {
+      if (!window.confirm(`A categoria "${cat.name}" tem ${catVideos.length} vídeo(s). Apagar a categoria também apaga esses vídeos (inclusive no Bunny Stream). Essa ação não pode ser desfeita. Continuar?`)) return;
+      for (const v of catVideos) {
+        await supabase.functions.invoke("bunny-stream", { body: { action: "delete-video", id: v.id } });
+      }
+    } else {
+      if (!window.confirm(`Apagar a categoria "${cat.name}"?`)) return;
+    }
+    const { error } = await supabase.from("student_categories").delete().eq("id", cat.id);
+    if (error) { alert("Não consegui apagar a categoria: " + error.message); return; }
+    await load();
+  };
+
+  const handleDeleteVideo = async (video) => {
+    if (!window.confirm(`Apagar o vídeo "${video.title}"? Essa ação remove o vídeo do Bunny Stream também e não pode ser desfeita.`)) return;
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "delete-video", id: video.id } });
+    if (error || data?.error) { alert("Não consegui apagar o vídeo: " + (data?.error || error.message)); return; }
+    await load();
+  };
+
+  return (
+    <div>
+      <div className="tf-card">
+        <div className="tf-card-head">
+          <h3>Categorias</h3>
+          <button type="button" className="tf-btn-outline" onClick={() => setShowNewCategory((s) => !s)}>
+            <FolderPlus size={14} /> Nova categoria
+          </button>
+        </div>
+
+        {showNewCategory && (
+          <form className="tf-form" onSubmit={handleCreateCategory} style={{ marginBottom: 16 }}>
+            <div className="tf-form-row">
+              <label>Nome da categoria</label>
+              <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Ex: Mentoria B3 - Módulo 1" />
+            </div>
+            <div className="tf-form-row">
+              <label>Descrição (opcional)</label>
+              <textarea className="tf-textarea" rows={2} value={newCatDesc} onChange={(e) => setNewCatDesc(e.target.value)} />
+            </div>
+            <button className="tf-btn-primary tf-form-submit" disabled={savingCat}>{savingCat ? "Criando..." : "Criar categoria"}</button>
+          </form>
+        )}
+
+        {loading ? (
+          <p className="tf-muted" style={{ textAlign: "center", padding: 20 }}>Carregando...</p>
+        ) : categories.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Nenhuma categoria criada ainda.</p>
+        ) : (
+          <div>
+            {categories.map((cat) => {
+              const catVideos = videos.filter((v) => v.category_id === cat.id);
+              return (
+                <div key={cat.id} className="tf-category-block">
+                  {editingCatId === cat.id ? (
+                    <div className="tf-mentor-edit-row">
+                      <input value={editCatName} onChange={(e) => setEditCatName(e.target.value)} placeholder="Nome" />
+                      <textarea className="tf-textarea" rows={2} value={editCatDesc} onChange={(e) => setEditCatDesc(e.target.value)} placeholder="Descrição (opcional)" />
+                      <div className="tf-mentor-edit-actions">
+                        <button type="button" className="tf-btn-primary" onClick={() => saveEditCategory(cat.id)}>Salvar</button>
+                        <button type="button" className="tf-btn-outline" onClick={() => setEditingCatId(null)}>Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="tf-category-header">
+                      <div>
+                        <span className="tf-asset">{cat.name}</span>
+                        {cat.description && <p className="tf-muted" style={{ fontSize: 12, margin: "2px 0 0" }}>{cat.description}</p>}
+                      </div>
+                      <div className="tf-ranking-actions">
+                        <button type="button" className="tf-row-action" onClick={() => setUploadCategoryId(uploadCategoryId === cat.id ? null : cat.id)} title="Adicionar vídeo"><Upload size={13} /></button>
+                        <button type="button" className="tf-row-action" onClick={() => startEditCategory(cat)} title="Editar"><Pencil size={13} /></button>
+                        <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteCategory(cat)} title="Apagar"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                  )}
+
+                  {uploadCategoryId === cat.id && (
+                    <VideoUploadForm categoryId={cat.id} onDone={() => { setUploadCategoryId(null); load(); }} />
+                  )}
+
+                  {catVideos.length > 0 && (
+                    <div className="tf-trade-list" style={{ marginTop: 10 }}>
+                      {catVideos.map((v) => (
+                        <div key={v.id} className="tf-trade-row">
+                          <span className="tf-asset" style={{ flex: 1 }}>{v.title}</span>
+                          <span className={`tf-nav-badge ${v.status === "error" ? "tf-badge-error" : ""}`}>
+                            {v.status === "ready" ? "Pronto" : v.status === "error" ? "Erro" : "Processando"}
+                          </span>
+                          <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteVideo(v)} title="Apagar"><Trash2 size={13} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VideoUploadForm({ categoryId, onDone }) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState("idle"); // idle | creating | uploading | done | error
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.[^/.]+$/, ""));
+  };
+
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!file || !title.trim()) return;
+    setStatus("creating");
+    setErrorMsg("");
+    try {
+      const { data, error } = await supabase.functions.invoke("bunny-stream", {
+        body: { action: "create-video", title: title.trim(), description: description.trim() || null, category_id: categoryId },
+      });
+      if (error || data?.error) throw new Error(data?.error || error.message);
+
+      const { videoId, libraryId, authorizationSignature, authorizationExpire } = data;
+
+      setStatus("uploading");
+      await new Promise((resolve, reject) => {
+        const upload = new tus.Upload(file, {
+          endpoint: BUNNY_TUS_ENDPOINT,
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            AuthorizationSignature: authorizationSignature,
+            AuthorizationExpire: String(authorizationExpire),
+            VideoId: videoId,
+            LibraryId: String(libraryId),
+          },
+          metadata: { filetype: file.type, title: title.trim() },
+          onError: (err) => reject(err),
+          onProgress: (bytesUploaded, bytesTotal) => {
+            setProgress(Math.round((bytesUploaded / bytesTotal) * 100));
+          },
+          onSuccess: () => resolve(),
+        });
+        upload.start();
+      });
+
+      setStatus("done");
+      onDone && onDone();
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || "Não consegui subir o vídeo.");
+      setStatus("error");
+    }
+  };
+
+  return (
+    <form className="tf-form tf-video-upload-form" onSubmit={handleUpload}>
+      <div className="tf-form-row">
+        <label>Título do vídeo</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Aula 1 - Introdução" />
+      </div>
+      <div className="tf-form-row">
+        <label>Descrição (opcional)</label>
+        <textarea className="tf-textarea" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </div>
+      <div className="tf-import-dropzone">
+        <input type="file" id={`tf-video-file-${categoryId}`} accept="video/*" onChange={handleFile} style={{ display: "none" }} />
+        <label htmlFor={`tf-video-file-${categoryId}`} className="tf-btn-outline" style={{ cursor: "pointer", display: "inline-flex" }}>
+          <Upload size={15} /> {file ? file.name : "Escolher vídeo"}
+        </label>
+      </div>
+
+      {status === "uploading" && (
+        <div className="tf-upload-progress">
+          <div className="tf-upload-progress-bar" style={{ width: `${progress}%` }} />
+          <span>{progress}%</span>
+        </div>
+      )}
+      {status === "error" && <p className="text-coral" style={{ fontSize: 12.5 }}>{errorMsg}</p>}
+      {status === "done" && <p className="text-lime" style={{ fontSize: 12.5 }}>Upload concluído! O vídeo aparece como "Processando" até o Bunny terminar de converter.</p>}
+
+      <button className="tf-btn-primary tf-form-submit" disabled={!file || !title.trim() || status === "creating" || status === "uploading"}>
+        {status === "creating" ? "Preparando..." : status === "uploading" ? `Enviando... ${progress}%` : "Enviar vídeo"}
+      </button>
+    </form>
+  );
+}
+
+function StudentAccessManager() {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [granted, setGranted] = useState([]);
+  const [loadingGranted, setLoadingGranted] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  const loadGranted = async () => {
+    setLoadingGranted(true);
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "list-access" } });
+    if (!error && data?.access) setGranted(data.access);
+    setLoadingGranted(false);
+  };
+
+  useEffect(() => { loadGranted(); }, []);
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setSearching(true);
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "search-students", query: query.trim() } });
+    setSearching(false);
+    if (error) { alert("Não consegui buscar: " + error.message); return; }
+    setResults(data?.results || []);
+  };
+
+  const handleGrant = async (userId) => {
+    setBusyId(userId);
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "grant-access", userId } });
+    setBusyId(null);
+    if (error || data?.error) { alert("Não consegui liberar o acesso: " + (data?.error || error.message)); return; }
+    await loadGranted();
+    setResults((r) => r.map((u) => (u.id === userId ? { ...u, hasAccess: true } : u)));
+  };
+
+  const handleRevoke = async (userId) => {
+    if (!window.confirm("Remover o acesso desse aluno ao Painel do Aluno?")) return;
+    setBusyId(userId);
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "revoke-access", userId } });
+    setBusyId(null);
+    if (error || data?.error) { alert("Não consegui remover o acesso: " + (data?.error || error.message)); return; }
+    await loadGranted();
+    setResults((r) => r.map((u) => (u.id === userId ? { ...u, hasAccess: false } : u)));
+  };
+
+  return (
+    <div>
+      <div className="tf-card" style={{ marginBottom: 20 }}>
+        <div className="tf-card-head"><h3>Buscar aluno</h3></div>
+        <p className="tf-muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 14 }}>
+          Busque pelo nome ou e-mail do aluno já cadastrado no Tradefy pra liberar o acesso ao Painel do Aluno.
+        </p>
+        <form onSubmit={handleSearch} style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nome ou e-mail do aluno" style={{ flex: 1 }} />
+          <button className="tf-btn-primary" disabled={searching} style={{ flexShrink: 0 }}>
+            <Search size={14} /> {searching ? "Buscando..." : "Buscar"}
+          </button>
+        </form>
+
+        {results.length > 0 && (
+          <div className="tf-trade-list">
+            {results.map((u) => (
+              <div key={u.id} className="tf-trade-row">
+                <div style={{ flex: 1 }}>
+                  <span className="tf-asset">{u.name || "(sem nome)"}</span>
+                  <p className="tf-muted" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{u.email}</p>
+                </div>
+                {!u.hasActiveSubscription && <span className="tf-nav-badge tf-badge-error">Sem assinatura ativa</span>}
+                {u.hasAccess ? (
+                  <button type="button" className="tf-btn-outline" onClick={() => handleRevoke(u.id)} disabled={busyId === u.id}>
+                    <UserMinus size={13} /> Remover acesso
+                  </button>
+                ) : (
+                  <button type="button" className="tf-btn-primary" onClick={() => handleGrant(u.id)} disabled={busyId === u.id}>
+                    <UserPlus size={13} /> Liberar acesso
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="tf-card">
+        <div className="tf-card-head"><h3>Alunos com acesso ({granted.length})</h3></div>
+        {loadingGranted ? (
+          <p className="tf-muted" style={{ textAlign: "center", padding: 20 }}>Carregando...</p>
+        ) : granted.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum aluno com acesso ainda.</p>
+        ) : (
+          <div className="tf-trade-list">
+            {granted.map((u) => (
+              <div key={u.id} className="tf-trade-row">
+                <div style={{ flex: 1 }}>
+                  <span className="tf-asset">{u.name || "(sem nome)"}</span>
+                  <p className="tf-muted" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{u.email}</p>
+                </div>
+                {!u.hasActiveSubscription && <span className="tf-nav-badge tf-badge-error">Assinatura inativa</span>}
+                <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleRevoke(u.id)} title="Remover acesso"><Trash2 size={13} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -4310,5 +4862,31 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-cal-stats-row{ grid-template-columns:repeat(2,1fr); }
   .tf-table-row{ grid-template-columns:1fr .6fr .8fr; }
   .tf-table-row span:nth-child(3){ display:none; }
+}
+
+/* ---------------------------- Painel do Aluno ---------------------------- */
+.tf-video-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:14px; }
+.tf-video-card{ display:flex; flex-direction:column; gap:0; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:0; overflow:hidden; cursor:pointer; text-align:left; transition:border-color .15s; }
+.tf-video-card:hover{ border-color:var(--lime); }
+.tf-video-card-disabled{ cursor:default; opacity:.6; }
+.tf-video-card-disabled:hover{ border-color:var(--border); }
+.tf-video-thumb{ display:flex; align-items:center; justify-content:center; aspect-ratio:16/9; background:linear-gradient(135deg,#152033,#0c1420); color:var(--lime); }
+.tf-video-info{ padding:8px 10px 12px; }
+.tf-video-title{ font-size:12.5px; font-weight:600; display:block; line-height:1.3; }
+.tf-video-status{ font-size:11px; color:var(--muted); }
+.tf-category-block{ padding:14px 0; border-bottom:1px solid var(--border); }
+.tf-category-block:last-child{ border-bottom:none; }
+.tf-category-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.tf-video-upload-form{ margin:14px 0 4px; padding:14px; background:var(--surface-2); border-radius:10px; border:1px solid var(--border); }
+.tf-upload-progress{ position:relative; height:22px; background:var(--surface-2); border-radius:6px; overflow:hidden; margin:8px 0; border:1px solid var(--border); }
+.tf-upload-progress-bar{ position:absolute; inset:0 auto 0 0; background:var(--lime); transition:width .2s; }
+.tf-upload-progress span{ position:relative; z-index:1; display:block; text-align:center; font-size:11px; line-height:22px; font-weight:700; color:var(--text); }
+.tf-badge-error{ background:rgba(255,92,114,0.16); color:var(--coral); }
+.tf-modal-video{ width:100%; max-width:760px; }
+.tf-video-player-wrap{ position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; overflow:hidden; margin-top:6px; }
+.tf-video-player-wrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+
+@media (max-width: 640px) {
+  .tf-video-grid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
 }
 `;
