@@ -4343,7 +4343,7 @@ function StudentAccessManager() {
           Busque pelo nome ou e-mail do aluno já cadastrado no Tradefy pra liberar o acesso ao Painel do Aluno.
         </p>
         <form onSubmit={handleSearch} style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nome ou e-mail do aluno" style={{ flex: 1 }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Nome ou e-mail do aluno" style={{ flex: 1, fontSize: 16 }} />
           <button className="tf-btn-primary" disabled={searching} style={{ flexShrink: 0 }}>
             <Search size={14} /> {searching ? "Buscando..." : "Buscar"}
           </button>
@@ -4974,16 +4974,22 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-video-grid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
 }
 
-/* ------------------------- Painel do Aluno estilo Netflix ------------------------- */
+/* ------------------------- Painel do Aluno estilo Netflix -------------------------
+   Proporção recomendada pras imagens que o dono envia:
+   - Banner da categoria: 3:1  (ex: 1200x400px)
+   - Capa da aula (vídeo): 16:9 (ex: 1280x720px)
+   O CSS sempre corta a imagem enviada (object-fit:cover) pra caber exatamente
+   nessa proporção em qualquer tela, sem esticar nem distorcer.
+------------------------------------------------------------------------------- */
 .tf-netflix-section{ margin-bottom: 28px; }
-.tf-category-banner{ position:relative; border-radius:14px; overflow:hidden; margin-bottom:14px; aspect-ratio:21/6; background:linear-gradient(135deg,#152033,#0c1420); }
+.tf-category-banner{ position:relative; border-radius:14px; overflow:hidden; margin-bottom:14px; aspect-ratio:3/1; background:linear-gradient(135deg,#152033,#0c1420); }
 .tf-category-banner-empty{ aspect-ratio:auto; padding:16px 18px; background:linear-gradient(135deg,#152033,#0c1420); }
 .tf-category-banner img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
 .tf-category-banner-overlay{ position:relative; z-index:1; display:flex; align-items:flex-end; height:100%; padding:16px 18px; background:linear-gradient(to top, rgba(5,8,14,0.85), rgba(5,8,14,0.05) 65%); }
 .tf-category-banner-empty .tf-category-banner-overlay{ position:static; background:none; padding:0; height:auto; align-items:flex-start; }
-.tf-category-banner-overlay h3{ font-family:'Exo 2',sans-serif; font-size:16px; margin:0 0 2px; color:#fff; }
+.tf-category-banner-overlay h3{ font-family:'Exo 2',sans-serif; font-size:16px; margin:0 0 2px; color:#fff; line-height:1.25; }
 .tf-category-banner-empty .tf-category-banner-overlay h3{ color:var(--text); }
-.tf-category-banner-overlay p{ font-size:12px; margin:0; color:rgba(255,255,255,0.8); max-width:520px; }
+.tf-category-banner-overlay p{ font-size:12px; margin:0; color:rgba(255,255,255,0.8); max-width:520px; line-height:1.35; }
 .tf-category-banner-empty .tf-category-banner-overlay p{ color:var(--muted); }
 
 .tf-netflix-row{ display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
@@ -4998,13 +5004,38 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-play-overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.15); opacity:0; color:#fff; transition:opacity .15s; }
 .tf-netflix-card:not(:disabled):hover .tf-play-overlay{ opacity:1; background:rgba(0,0,0,0.4); }
 .tf-netflix-info{ padding:0 1px; }
+.tf-netflix-info .tf-video-title{
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  overflow:hidden; text-overflow:ellipsis; line-height:1.3; min-height:2.6em;
+}
 
 .tf-category-cover-preview{ width:40px; height:40px; border-radius:8px; overflow:hidden; background:var(--surface-2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .tf-category-cover-preview img{ width:100%; height:100%; object-fit:cover; display:block; }
 .tf-category-cover-preview-sm{ width:30px; height:30px; border-radius:6px; }
 
+/* Tablet e celular grande */
+@media (max-width: 900px) {
+  .tf-netflix-card{ flex-basis:150px; }
+}
+
+/* Celular */
 @media (max-width: 640px) {
-  .tf-netflix-card{ flex-basis:130px; }
-  .tf-category-banner{ aspect-ratio:16/7; }
+  .tf-netflix-section{ margin-bottom:22px; }
+  .tf-netflix-card{ flex-basis:128px; }
+  .tf-netflix-row{ gap:10px; }
+  .tf-category-banner{ aspect-ratio:16/8; border-radius:12px; margin-bottom:10px; }
+  .tf-category-banner-overlay{ padding:12px 14px; }
+  .tf-category-banner-overlay h3{ font-size:14.5px; }
+  .tf-category-banner-overlay p{ font-size:11.5px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+}
+
+/* Celular pequeno */
+@media (max-width: 380px) {
+  .tf-netflix-card{ flex-basis:112px; }
+  .tf-category-banner{ aspect-ratio:3/2; }
+  .tf-netflix-info .tf-video-title{ font-size:11.5px; }
+  .tf-category-header{ flex-wrap:wrap; }
+  .tf-category-header .tf-ranking-actions{ margin-left:50px; }
+  .tf-category-cover-preview{ width:34px; height:34px; }
 }
 `;
