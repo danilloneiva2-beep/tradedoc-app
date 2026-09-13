@@ -4009,6 +4009,11 @@ function VideoPlayerModal({ video, onClose }) {
             />
           </div>
         )}
+        {video.description && (
+          <div className="tf-video-description">
+            <p>{video.description}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -5098,6 +5103,8 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-modal-video{ width:100%; max-width:760px; }
 .tf-video-player-wrap{ position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; overflow:hidden; margin-top:6px; }
 .tf-video-player-wrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+.tf-video-description{ margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+.tf-video-description p{ font-size:13.5px; line-height:1.55; color:var(--text); white-space:pre-wrap; margin:0; }
 
 @media (max-width: 640px) {
   .tf-video-grid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
