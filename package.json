@@ -16,7 +16,8 @@
     "lucide-react": "^0.383.0",
     "papaparse": "^5.4.1",
     "xlsx": "^0.18.5",
-    "three": "^0.160.0"
+    "three": "^0.160.0",
+    "tus-js-client": "^4.1.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
