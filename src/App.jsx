@@ -5011,13 +5011,13 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 
 /* ------------------------- Painel do Aluno estilo Netflix -------------------------
    Proporção recomendada pras imagens que o dono envia:
-   - Banner da categoria: 3:1  (ex: 1200x400px)
-   - Capa da aula (vídeo): 16:9 (ex: 1280x720px)
+   - Banner da categoria: 5:1  (ex: 1500x300px) — bem fino, tipo faixa
+   - Capa da aula (vídeo): 2:3 (ex: 800x1200px) — vertical, estilo story/poster
    O CSS sempre corta a imagem enviada (object-fit:cover) pra caber exatamente
    nessa proporção em qualquer tela, sem esticar nem distorcer.
 ------------------------------------------------------------------------------- */
 .tf-netflix-section{ margin-bottom: 28px; }
-.tf-category-banner{ position:relative; border-radius:14px; overflow:hidden; margin-bottom:14px; aspect-ratio:3/1; background:linear-gradient(135deg,#152033,#0c1420); }
+.tf-category-banner{ position:relative; border-radius:14px; overflow:hidden; margin-bottom:14px; aspect-ratio:5/1; background:linear-gradient(135deg,#152033,#0c1420); }
 .tf-category-banner-empty{ aspect-ratio:auto; padding:16px 18px; background:linear-gradient(135deg,#152033,#0c1420); }
 .tf-category-banner img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
 .tf-category-banner-overlay{ position:relative; z-index:1; display:flex; align-items:flex-end; height:100%; padding:16px 18px; background:linear-gradient(to top, rgba(5,8,14,0.85), rgba(5,8,14,0.05) 65%); }
@@ -5030,11 +5030,11 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-netflix-row{ display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; }
 .tf-netflix-row::-webkit-scrollbar{ height:6px; }
 .tf-netflix-row::-webkit-scrollbar-thumb{ background:var(--border); border-radius:10px; }
-.tf-netflix-card{ flex:0 0 180px; scroll-snap-align:start; background:none; border:none; padding:0; text-align:left; cursor:pointer; display:flex; flex-direction:column; gap:6px; color:var(--text); font-family:inherit; }
+.tf-netflix-card{ flex:0 0 200px; scroll-snap-align:start; background:none; border:none; padding:0; text-align:left; cursor:pointer; display:flex; flex-direction:column; gap:6px; color:var(--text); font-family:inherit; }
 .tf-netflix-card:disabled{ cursor:default; }
 .tf-netflix-info .tf-video-title{ color:var(--text); }
 .tf-netflix-info .tf-video-status{ color:var(--muted); }
-.tf-netflix-poster{ position:relative; aspect-ratio:16/9; border-radius:10px; overflow:hidden; background:linear-gradient(135deg,#152033,#0c1420); border:1px solid var(--border); transition:border-color .15s, transform .15s; }
+.tf-netflix-poster{ position:relative; aspect-ratio:2/3; border-radius:10px; overflow:hidden; background:linear-gradient(135deg,#152033,#0c1420); border:1px solid var(--border); transition:border-color .15s, transform .15s; }
 .tf-netflix-card:not(:disabled):hover .tf-netflix-poster{ border-color:var(--lime); transform:translateY(-2px); }
 .tf-netflix-poster img{ width:100%; height:100%; object-fit:cover; display:block; }
 .tf-netflix-poster-fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--lime); }
@@ -5052,24 +5052,25 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 
 /* Tablet e celular grande */
 @media (max-width: 900px) {
-  .tf-netflix-card{ flex-basis:150px; }
+  .tf-netflix-card{ flex-basis:170px; }
+  .tf-category-banner{ aspect-ratio:4.5/1; }
 }
 
 /* Celular */
 @media (max-width: 640px) {
   .tf-netflix-section{ margin-bottom:22px; }
-  .tf-netflix-card{ flex-basis:128px; }
+  .tf-netflix-card{ flex-basis:145px; }
   .tf-netflix-row{ gap:10px; }
-  .tf-category-banner{ aspect-ratio:16/8; border-radius:12px; margin-bottom:10px; }
-  .tf-category-banner-overlay{ padding:12px 14px; }
-  .tf-category-banner-overlay h3{ font-size:14.5px; }
-  .tf-category-banner-overlay p{ font-size:11.5px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .tf-category-banner{ aspect-ratio:4/1; border-radius:12px; margin-bottom:10px; }
+  .tf-category-banner-overlay{ padding:10px 14px; }
+  .tf-category-banner-overlay h3{ font-size:13.5px; }
+  .tf-category-banner-overlay p{ font-size:11px; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
 }
 
 /* Celular pequeno */
 @media (max-width: 380px) {
-  .tf-netflix-card{ flex-basis:112px; }
-  .tf-category-banner{ aspect-ratio:3/2; }
+  .tf-netflix-card{ flex-basis:125px; }
+  .tf-category-banner{ aspect-ratio:3.2/1; }
   .tf-netflix-info .tf-video-title{ font-size:11.5px; }
   .tf-category-header{ flex-wrap:wrap; }
   .tf-category-header .tf-ranking-actions{ margin-left:50px; }
