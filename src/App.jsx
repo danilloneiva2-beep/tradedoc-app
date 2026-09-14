@@ -5178,7 +5178,7 @@ const APP_STYLES = `
 }
 .tf-wa-float:hover{transform:scale(1.08);}
 @media (max-width:860px){
-  .tf-wa-float{ width:48px; height:48px; bottom:16px; right:16px; }
+  .tf-wa-float{ width:48px; height:48px; bottom:calc(16px + env(safe-area-inset-bottom)); right:16px; }
 }
 .tf-sidebar-close{display:none;}
 .tf-sidebar-backdrop{display:none;}
@@ -5191,7 +5191,8 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 
   .tf-mobile-topbar{
     display:flex; align-items:center; gap:12px;
-    padding:14px 16px; background:var(--surface); border-bottom:1px solid var(--border);
+    padding:calc(14px + env(safe-area-inset-top)) 16px 14px;
+    background:var(--surface); border-bottom:1px solid var(--border);
     position:sticky; top:0; z-index:15;
   }
   .tf-hamburger-btn{
@@ -5205,7 +5206,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
     position:fixed; top:0; left:0; bottom:0; width:250px; max-width:80vw; height:100vh;
     transform:translateX(-100%); transition:transform .25s ease;
     border-right:1px solid var(--border); z-index:30;
-    padding:20px 14px calc(20px + env(safe-area-inset-bottom));
+    padding:calc(20px + env(safe-area-inset-top)) 14px calc(20px + env(safe-area-inset-bottom));
   }
   .tf-sidebar.mobile-open{ transform:translateX(0); box-shadow:8px 0 24px rgba(0,0,0,0.4); }
   .tf-sidebar-backdrop{
