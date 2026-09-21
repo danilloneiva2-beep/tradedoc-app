@@ -4058,16 +4058,18 @@ function StudentPanelView({ session, isOwnerAccount }) {
 
 function StudentLessonsList({ isOwnerAccount }) {
   const [categories, setCategories] = useState([]);
+  const [modules, setModules] = useState([]);
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [playingVideo, setPlayingVideo] = useState(null);
-  const [openCategoryId, setOpenCategoryId] = useState(null);
 
   const load = async () => {
     setLoading(true);
     const { data: cats } = await supabase.from("student_categories").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+    const { data: mods } = await supabase.from("student_modules").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     const { data: vids } = await supabase.from("student_videos").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     setCategories(cats || []);
+    setModules(mods || []);
     setVideos(vids || []);
     setLoading(false);
   };
@@ -4101,66 +4103,60 @@ function StudentLessonsList({ isOwnerAccount }) {
     );
   }
 
-  const openCategory = openCategoryId ? visibleCategories.find((c) => c.id === openCategoryId) : null;
-
-  // Uma categoria aberta: mostra só as aulas de dentro dela (a "subcategoria" clicada)
-  if (openCategory) {
-    const catVideos = videos.filter((v) => v.category_id === openCategory.id && (isOwnerAccount || v.status === "ready"));
-    return (
-      <div className="tf-netflix">
-        <button type="button" className="tf-cat-back" onClick={() => setOpenCategoryId(null)}>
-          <ChevronLeft size={16} /> Categorias
-        </button>
-        <div className={`tf-category-banner ${openCategory.cover_url ? "" : "tf-category-banner-empty"}`}>
-          {openCategory.cover_url && <img src={openCategory.cover_url} alt="" />}
-          <div className="tf-category-banner-overlay">
-            <div>
-              <h3>{openCategory.name}</h3>
-              {openCategory.description && <p>{openCategory.description}</p>}
-            </div>
-          </div>
-        </div>
-        {catVideos.length === 0 ? (
-          <p className="tf-muted" style={{ fontSize: 13, marginTop: 14 }}>Nenhum vídeo nessa categoria ainda.</p>
-        ) : (
-          <div className="tf-lesson-grid">
-            {catVideos.map((v) => (
-              <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
-            ))}
-          </div>
-        )}
-        {playingVideo && <VideoPlayerModal video={playingVideo} onClose={() => setPlayingVideo(null)} />}
-      </div>
-    );
-  }
-
-  // Nenhuma categoria aberta: mostra a "prateleira" de categorias — clicar entra na categoria
   return (
-    <div className="tf-category-grid">
+    <div className="tf-netflix">
       {visibleCategories.map((cat) => {
-        const count = videos.filter((v) => v.category_id === cat.id && (isOwnerAccount || v.status === "ready")).length;
-        return <CategoryFolderCard key={cat.id} category={cat} count={count} onOpen={() => setOpenCategoryId(cat.id)} />;
-      })}
-    </div>
-  );
-}
+        const catModules = modules.filter((m) => m.category_id === cat.id);
+        const catVideosNoModule = videos.filter((v) => v.category_id === cat.id && !v.module_id && (isOwnerAccount || v.status === "ready"));
+        const modulesWithVideos = catModules
+          .map((mod) => ({ mod, modVideos: videos.filter((v) => v.module_id === mod.id && (isOwnerAccount || v.status === "ready")) }))
+          .filter(({ modVideos }) => isOwnerAccount || modVideos.length > 0);
+        const hasAnything = modulesWithVideos.some(({ modVideos }) => modVideos.length > 0) || catVideosNoModule.length > 0;
 
-function CategoryFolderCard({ category, count, onOpen }) {
-  return (
-    <button type="button" className="tf-category-folder" onClick={onOpen}>
-      <div className={`tf-category-banner ${category.cover_url ? "" : "tf-category-banner-empty"}`}>
-        {category.cover_url && <img src={category.cover_url} alt="" />}
-        <div className="tf-category-banner-overlay">
-          <div>
-            <h3>{category.name}</h3>
-            {category.description && <p>{category.description}</p>}
+        return (
+          <div key={cat.id} className="tf-netflix-section">
+            <div className={`tf-category-banner ${cat.cover_url ? "" : "tf-category-banner-empty"}`}>
+              {cat.cover_url && <img src={cat.cover_url} alt="" />}
+              <div className="tf-category-banner-overlay">
+                <div>
+                  <h3>{cat.name}</h3>
+                  {cat.description && <p>{cat.description}</p>}
+                </div>
+              </div>
+            </div>
+
+            {!hasAnything ? (
+              <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum vídeo nessa categoria ainda.</p>
+            ) : (
+              <>
+                {modulesWithVideos.map(({ mod, modVideos }) => (
+                  <div key={mod.id} className="tf-netflix-module">
+                    <h4 className="tf-netflix-module-title">{mod.name}</h4>
+                    {modVideos.length === 0 ? (
+                      <p className="tf-muted" style={{ fontSize: 12.5 }}>Nenhum vídeo nesse módulo ainda.</p>
+                    ) : (
+                      <div className="tf-netflix-row">
+                        {modVideos.map((v) => (
+                          <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {catVideosNoModule.length > 0 && (
+                  <div className="tf-netflix-row">
+                    {catVideosNoModule.map((v) => (
+                      <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        </div>
-      </div>
-      <div className="tf-category-folder-count">
-        <PlayCircle size={12} /> {count} {count === 1 ? "aula" : "aulas"}
-      </div>
-    </button>
+        );
+      })}
+      {playingVideo && <VideoPlayerModal video={playingVideo} onClose={() => setPlayingVideo(null)} />}
+    </div>
   );
 }
 
@@ -4254,6 +4250,7 @@ function VideoPlayerModal({ video, onClose }) {
 
 function StudentContentManager() {
   const [categories, setCategories] = useState([]);
+  const [modules, setModules] = useState([]);
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewCategory, setShowNewCategory] = useState(false);
@@ -4263,17 +4260,27 @@ function StudentContentManager() {
   const [editingCatId, setEditingCatId] = useState(null);
   const [editCatName, setEditCatName] = useState("");
   const [editCatDesc, setEditCatDesc] = useState("");
-  const [uploadCategoryId, setUploadCategoryId] = useState(null);
   const [editingVideoId, setEditingVideoId] = useState(null);
   const [editVideoTitle, setEditVideoTitle] = useState("");
   const [editVideoDesc, setEditVideoDesc] = useState("");
   const [savingVideo, setSavingVideo] = useState(false);
 
+  const [showNewModuleForCat, setShowNewModuleForCat] = useState(null);
+  const [newModName, setNewModName] = useState("");
+  const [newModDesc, setNewModDesc] = useState("");
+  const [savingMod, setSavingMod] = useState(false);
+  const [editingModId, setEditingModId] = useState(null);
+  const [editModName, setEditModName] = useState("");
+  const [editModDesc, setEditModDesc] = useState("");
+  const [uploadModuleId, setUploadModuleId] = useState(null);
+
   const load = async () => {
     setLoading(true);
     const { data: cats } = await supabase.from("student_categories").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+    const { data: mods } = await supabase.from("student_modules").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     const { data: vids } = await supabase.from("student_videos").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     setCategories(cats || []);
+    setModules(mods || []);
     setVideos(vids || []);
     setLoading(false);
   };
@@ -4315,7 +4322,7 @@ function StudentContentManager() {
   const handleDeleteCategory = async (cat) => {
     const catVideos = videos.filter((v) => v.category_id === cat.id);
     if (catVideos.length > 0) {
-      if (!window.confirm(`A categoria "${cat.name}" tem ${catVideos.length} vídeo(s). Apagar a categoria também apaga esses vídeos (inclusive no Bunny Stream). Essa ação não pode ser desfeita. Continuar?`)) return;
+      if (!window.confirm(`A categoria "${cat.name}" tem ${catVideos.length} vídeo(s). Apagar a categoria também apaga esses vídeos (inclusive no Bunny Stream) e os módulos dela. Essa ação não pode ser desfeita. Continuar?`)) return;
       for (const v of catVideos) {
         await supabase.functions.invoke("bunny-stream", { body: { action: "delete-video", id: v.id } });
       }
@@ -4324,6 +4331,50 @@ function StudentContentManager() {
     }
     const { error } = await supabase.from("student_categories").delete().eq("id", cat.id);
     if (error) { alert("Não consegui apagar a categoria: " + error.message); return; }
+    await load();
+  };
+
+  const handleCreateModule = async (e, categoryId) => {
+    e.preventDefault();
+    if (!newModName.trim()) return;
+    setSavingMod(true);
+    const { error } = await supabase.from("student_modules").insert({
+      category_id: categoryId,
+      name: newModName.trim(),
+      description: newModDesc.trim() || null,
+      position: modules.filter((m) => m.category_id === categoryId).length,
+    });
+    setSavingMod(false);
+    if (error) { alert("Não consegui criar o módulo: " + error.message); return; }
+    setNewModName(""); setNewModDesc(""); setShowNewModuleForCat(null);
+    await load();
+  };
+
+  const startEditModule = (mod) => {
+    setEditingModId(mod.id);
+    setEditModName(mod.name);
+    setEditModDesc(mod.description || "");
+  };
+
+  const saveEditModule = async (id) => {
+    if (!editModName.trim()) return;
+    const { error } = await supabase.from("student_modules").update({
+      name: editModName.trim(),
+      description: editModDesc.trim() || null,
+    }).eq("id", id);
+    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    setEditingModId(null);
+    await load();
+  };
+
+  const handleDeleteModule = async (mod) => {
+    const modVideos = videos.filter((v) => v.module_id === mod.id);
+    const msg = modVideos.length > 0
+      ? `Apagar o módulo "${mod.name}"? As ${modVideos.length} aula(s) dele NÃO são apagadas — só ficam sem módulo dentro da categoria.`
+      : `Apagar o módulo "${mod.name}"?`;
+    if (!window.confirm(msg)) return;
+    const { error } = await supabase.from("student_modules").delete().eq("id", mod.id);
+    if (error) { alert("Não consegui apagar o módulo: " + error.message); return; }
     await load();
   };
 
@@ -4353,6 +4404,21 @@ function StudentContentManager() {
     await load();
   };
 
+  const videoRowProps = (v) => ({
+    video: v,
+    isEditing: editingVideoId === v.id,
+    editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo,
+    onStartEdit: () => startEditVideo(v),
+    onSaveEdit: () => saveEditVideo(v.id),
+    onCancelEdit: () => setEditingVideoId(null),
+    onDelete: () => handleDeleteVideo(v),
+    onCoverUploaded: async (url) => {
+      const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
+      if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
+      await load();
+    },
+  });
+
   return (
     <div>
       <div className="tf-card">
@@ -4367,7 +4433,7 @@ function StudentContentManager() {
           <form className="tf-form" onSubmit={handleCreateCategory} style={{ marginBottom: 16 }}>
             <div className="tf-form-row">
               <label>Nome da categoria</label>
-              <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Ex: Mentoria B3 - Módulo 1" />
+              <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Ex: Mentoria Forex" />
             </div>
             <div className="tf-form-row">
               <label>Descrição (opcional)</label>
@@ -4384,7 +4450,8 @@ function StudentContentManager() {
         ) : (
           <div>
             {categories.map((cat) => {
-              const catVideos = videos.filter((v) => v.category_id === cat.id);
+              const catModules = modules.filter((m) => m.category_id === cat.id);
+              const catVideosNoModule = videos.filter((v) => v.category_id === cat.id && !v.module_id);
               return (
                 <div key={cat.id} className="tf-category-block">
                   {editingCatId === cat.id ? (
@@ -4414,51 +4481,84 @@ function StudentContentManager() {
                             await load();
                           }}
                         />
-                        <button type="button" className="tf-row-action" onClick={() => setUploadCategoryId(uploadCategoryId === cat.id ? null : cat.id)} title="Adicionar vídeo"><Upload size={13} /></button>
                         <button type="button" className="tf-row-action" onClick={() => startEditCategory(cat)} title="Editar"><Pencil size={13} /></button>
                         <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteCategory(cat)} title="Apagar"><Trash2 size={13} /></button>
                       </div>
                     </div>
                   )}
 
-                  {uploadCategoryId === cat.id && (
-                    <VideoUploadForm categoryId={cat.id} onDone={() => { setUploadCategoryId(null); load(); }} />
-                  )}
+                  <div className="tf-module-list">
+                    <button
+                      type="button"
+                      className="tf-btn-outline"
+                      style={{ marginTop: 10 }}
+                      onClick={() => setShowNewModuleForCat(showNewModuleForCat === cat.id ? null : cat.id)}
+                    >
+                      <FolderPlus size={13} /> Novo módulo
+                    </button>
 
-                  {catVideos.length > 0 && (
-                    <div className="tf-trade-list" style={{ marginTop: 10 }}>
-                      {catVideos.map((v) => (
-                        editingVideoId === v.id ? (
-                          <div key={v.id} className="tf-mentor-edit-row">
-                            <input value={editVideoTitle} onChange={(e) => setEditVideoTitle(e.target.value)} placeholder="Título da aula" />
-                            <textarea className="tf-textarea" rows={2} value={editVideoDesc} onChange={(e) => setEditVideoDesc(e.target.value)} placeholder="Descrição (opcional)" />
-                            <div className="tf-mentor-edit-actions">
-                              <button type="button" className="tf-btn-primary" disabled={savingVideo} onClick={() => saveEditVideo(v.id)}>{savingVideo ? "Salvando..." : "Salvar"}</button>
-                              <button type="button" className="tf-btn-outline" onClick={() => setEditingVideoId(null)}>Cancelar</button>
+                    {showNewModuleForCat === cat.id && (
+                      <form className="tf-form" onSubmit={(e) => handleCreateModule(e, cat.id)} style={{ marginTop: 10 }}>
+                        <div className="tf-form-row">
+                          <label>Nome do módulo</label>
+                          <input value={newModName} onChange={(e) => setNewModName(e.target.value)} placeholder="Ex: Módulo 1 - Introdução" />
+                        </div>
+                        <div className="tf-form-row">
+                          <label>Descrição (opcional)</label>
+                          <textarea className="tf-textarea" rows={2} value={newModDesc} onChange={(e) => setNewModDesc(e.target.value)} />
+                        </div>
+                        <button className="tf-btn-primary tf-form-submit" disabled={savingMod}>{savingMod ? "Criando..." : "Criar módulo"}</button>
+                      </form>
+                    )}
+
+                    {catModules.map((mod) => {
+                      const modVideos = videos.filter((v) => v.module_id === mod.id);
+                      return (
+                        <div key={mod.id} className="tf-module-block">
+                          {editingModId === mod.id ? (
+                            <div className="tf-mentor-edit-row">
+                              <input value={editModName} onChange={(e) => setEditModName(e.target.value)} placeholder="Nome do módulo" />
+                              <textarea className="tf-textarea" rows={2} value={editModDesc} onChange={(e) => setEditModDesc(e.target.value)} placeholder="Descrição (opcional)" />
+                              <div className="tf-mentor-edit-actions">
+                                <button type="button" className="tf-btn-primary" onClick={() => saveEditModule(mod.id)}>Salvar</button>
+                                <button type="button" className="tf-btn-outline" onClick={() => setEditingModId(null)}>Cancelar</button>
+                              </div>
                             </div>
-                          </div>
-                        ) : (
-                          <div key={v.id} className="tf-trade-row">
-                            <div className="tf-category-cover-preview tf-category-cover-preview-sm">
-                              {v.cover_url ? <img src={v.cover_url} alt="" /> : <ImageIcon size={13} className="tf-muted" />}
+                          ) : (
+                            <div className="tf-module-header">
+                              <span className="tf-module-header-title">{mod.name}</span>
+                              <div className="tf-ranking-actions">
+                                <button type="button" className="tf-row-action" onClick={() => setUploadModuleId(uploadModuleId === mod.id ? null : mod.id)} title="Adicionar aula"><Upload size={13} /></button>
+                                <button type="button" className="tf-row-action" onClick={() => startEditModule(mod)} title="Editar"><Pencil size={13} /></button>
+                                <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteModule(mod)} title="Apagar"><Trash2 size={13} /></button>
+                              </div>
                             </div>
-                            <span className="tf-asset" style={{ flex: 1 }}>{v.title}</span>
-                            <span className={`tf-nav-badge ${v.status === "error" ? "tf-badge-error" : ""}`}>
-                              {v.status === "ready" ? "Pronto" : v.status === "error" ? "Erro" : "Processando"}
-                            </span>
-                            <CoverUploadButton
-                              title="Trocar capa do vídeo"
-                              onUploaded={async (url) => {
-                                const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
-                                if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
-                                await load();
-                              }}
-                            />
-                            <button type="button" className="tf-row-action" onClick={() => startEditVideo(v)} title="Editar"><Pencil size={13} /></button>
-                            <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteVideo(v)} title="Apagar"><Trash2 size={13} /></button>
-                          </div>
-                        )
-                      ))}
+                          )}
+                          {mod.description && editingModId !== mod.id && <p className="tf-muted" style={{ fontSize: 12, margin: "2px 0 0" }}>{mod.description}</p>}
+
+                          {uploadModuleId === mod.id && (
+                            <VideoUploadForm categoryId={cat.id} moduleId={mod.id} onDone={() => { setUploadModuleId(null); load(); }} />
+                          )}
+
+                          {modVideos.length > 0 && (
+                            <div className="tf-trade-list" style={{ marginTop: 10 }}>
+                              {modVideos.map((v) => <VideoAdminRow key={v.id} {...videoRowProps(v)} />)}
+                            </div>
+                          )}
+                          {modVideos.length === 0 && uploadModuleId !== mod.id && (
+                            <p className="tf-module-empty">Nenhuma aula nesse módulo ainda.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {catVideosNoModule.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <p className="tf-muted" style={{ fontSize: 12, marginBottom: 6 }}>Sem módulo:</p>
+                      <div className="tf-trade-list">
+                        {catVideosNoModule.map((v) => <VideoAdminRow key={v.id} {...videoRowProps(v)} />)}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -4471,7 +4571,36 @@ function StudentContentManager() {
   );
 }
 
-function VideoUploadForm({ categoryId, onDone }) {
+function VideoAdminRow({ video, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded }) {
+  if (isEditing) {
+    return (
+      <div className="tf-mentor-edit-row">
+        <input value={editVideoTitle} onChange={(e) => setEditVideoTitle(e.target.value)} placeholder="Título da aula" />
+        <textarea className="tf-textarea" rows={2} value={editVideoDesc} onChange={(e) => setEditVideoDesc(e.target.value)} placeholder="Descrição (opcional)" />
+        <div className="tf-mentor-edit-actions">
+          <button type="button" className="tf-btn-primary" disabled={savingVideo} onClick={onSaveEdit}>{savingVideo ? "Salvando..." : "Salvar"}</button>
+          <button type="button" className="tf-btn-outline" onClick={onCancelEdit}>Cancelar</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="tf-trade-row">
+      <div className="tf-category-cover-preview tf-category-cover-preview-sm">
+        {video.cover_url ? <img src={video.cover_url} alt="" /> : <ImageIcon size={13} className="tf-muted" />}
+      </div>
+      <span className="tf-asset" style={{ flex: 1 }}>{video.title}</span>
+      <span className={`tf-nav-badge ${video.status === "error" ? "tf-badge-error" : ""}`}>
+        {video.status === "ready" ? "Pronto" : video.status === "error" ? "Erro" : "Processando"}
+      </span>
+      <CoverUploadButton title="Trocar capa do vídeo" onUploaded={onCoverUploaded} />
+      <button type="button" className="tf-row-action" onClick={onStartEdit} title="Editar"><Pencil size={13} /></button>
+      <button type="button" className="tf-row-action tf-row-action-danger" onClick={onDelete} title="Apagar"><Trash2 size={13} /></button>
+    </div>
+  );
+}
+
+function VideoUploadForm({ categoryId, moduleId, onDone }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState(null);
@@ -4493,7 +4622,7 @@ function VideoUploadForm({ categoryId, onDone }) {
     setErrorMsg("");
     try {
       const { data, error } = await supabase.functions.invoke("bunny-stream", {
-        body: { action: "create-video", title: title.trim(), description: description.trim() || null, category_id: categoryId },
+        body: { action: "create-video", title: title.trim(), description: description.trim() || null, category_id: categoryId, module_id: moduleId || null },
       });
       if (error || data?.error) throw new Error(data?.error || error.message);
 
@@ -4540,8 +4669,8 @@ function VideoUploadForm({ categoryId, onDone }) {
         <textarea className="tf-textarea" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
       <div className="tf-import-dropzone">
-        <input type="file" id={`tf-video-file-${categoryId}`} accept="video/*" onChange={handleFile} style={{ display: "none" }} />
-        <label htmlFor={`tf-video-file-${categoryId}`} className="tf-btn-outline" style={{ cursor: "pointer", display: "inline-flex" }}>
+        <input type="file" id={`tf-video-file-${moduleId || categoryId}`} accept="video/*" onChange={handleFile} style={{ display: "none" }} />
+        <label htmlFor={`tf-video-file-${moduleId || categoryId}`} className="tf-btn-outline" style={{ cursor: "pointer", display: "inline-flex" }}>
           <Upload size={15} /> {file ? file.name : "Escolher vídeo"}
         </label>
       </div>
@@ -5385,16 +5514,17 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-category-cover-preview img{ width:100%; height:100%; object-fit:cover; display:block; }
 .tf-category-cover-preview-sm{ width:30px; height:30px; border-radius:6px; }
 
-/* Painel do Aluno — prateleira de categorias (pastas) e aulas de dentro de cada uma */
-.tf-category-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:18px; }
-.tf-category-folder{ background:none; border:none; padding:0; margin:0; text-align:left; cursor:pointer; font-family:inherit; color:var(--text); display:flex; flex-direction:column; gap:8px; }
-.tf-category-folder .tf-category-banner{ margin-bottom:0; border:1px solid var(--border); transition:border-color .15s, transform .15s; }
-.tf-category-folder:hover .tf-category-banner{ border-color:var(--lime); transform:translateY(-2px); }
-.tf-category-folder-count{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); padding-left:2px; }
-.tf-cat-back{ display:inline-flex; align-items:center; gap:4px; background:none; border:none; color:var(--muted); font-size:13px; font-weight:600; cursor:pointer; padding:0 0 14px; font-family:inherit; }
-.tf-cat-back:hover{ color:var(--text); }
-.tf-lesson-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; margin-top:16px; }
-.tf-lesson-grid .tf-netflix-card{ flex:none; }
+/* Painel do Aluno — categoria com módulos, e cada módulo com suas aulas */
+.tf-netflix-module{ margin-top:18px; }
+.tf-netflix-module:first-of-type{ margin-top:0; }
+.tf-netflix-module-title{ font-family:'Exo 2',sans-serif; font-size:14px; font-weight:600; color:var(--text); margin:0 0 10px; }
+
+/* Gerenciar conteúdo (dono) — lista de módulos dentro de cada categoria */
+.tf-module-list{ display:flex; flex-direction:column; gap:10px; }
+.tf-module-block{ margin-top:4px; padding:12px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; }
+.tf-module-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.tf-module-header-title{ font-size:13px; font-weight:700; }
+.tf-module-empty{ font-size:12.5px; color:var(--muted); margin:8px 0 0; }
 
 /* Tablet e celular grande */
 @media (max-width: 900px) {
@@ -5411,8 +5541,6 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-category-banner-overlay{ padding:10px 14px; }
   .tf-category-banner-overlay h3{ font-size:13.5px; }
   .tf-category-banner-overlay p{ font-size:11px; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
-  .tf-category-grid{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
-  .tf-lesson-grid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
 }
 
 /* Celular pequeno */
