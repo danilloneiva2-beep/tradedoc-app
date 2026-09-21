@@ -4061,6 +4061,7 @@ function StudentLessonsList({ isOwnerAccount }) {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [playingVideo, setPlayingVideo] = useState(null);
+  const [openCategoryId, setOpenCategoryId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -4100,35 +4101,66 @@ function StudentLessonsList({ isOwnerAccount }) {
     );
   }
 
-  return (
-    <div className="tf-netflix">
-      {visibleCategories.map((cat) => {
-        const catVideos = videos.filter((v) => v.category_id === cat.id && (isOwnerAccount || v.status === "ready"));
-        return (
-          <div key={cat.id} className="tf-netflix-section">
-            <div className={`tf-category-banner ${cat.cover_url ? "" : "tf-category-banner-empty"}`}>
-              {cat.cover_url && <img src={cat.cover_url} alt="" />}
-              <div className="tf-category-banner-overlay">
-                <div>
-                  <h3>{cat.name}</h3>
-                  {cat.description && <p>{cat.description}</p>}
-                </div>
-              </div>
+  const openCategory = openCategoryId ? visibleCategories.find((c) => c.id === openCategoryId) : null;
+
+  // Uma categoria aberta: mostra só as aulas de dentro dela (a "subcategoria" clicada)
+  if (openCategory) {
+    const catVideos = videos.filter((v) => v.category_id === openCategory.id && (isOwnerAccount || v.status === "ready"));
+    return (
+      <div className="tf-netflix">
+        <button type="button" className="tf-cat-back" onClick={() => setOpenCategoryId(null)}>
+          <ChevronLeft size={16} /> Categorias
+        </button>
+        <div className={`tf-category-banner ${openCategory.cover_url ? "" : "tf-category-banner-empty"}`}>
+          {openCategory.cover_url && <img src={openCategory.cover_url} alt="" />}
+          <div className="tf-category-banner-overlay">
+            <div>
+              <h3>{openCategory.name}</h3>
+              {openCategory.description && <p>{openCategory.description}</p>}
             </div>
-            {catVideos.length === 0 ? (
-              <p className="tf-muted" style={{ fontSize: 13 }}>Nenhum vídeo nessa categoria ainda.</p>
-            ) : (
-              <div className="tf-netflix-row">
-                {catVideos.map((v) => (
-                  <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
-                ))}
-              </div>
-            )}
           </div>
-        );
+        </div>
+        {catVideos.length === 0 ? (
+          <p className="tf-muted" style={{ fontSize: 13, marginTop: 14 }}>Nenhum vídeo nessa categoria ainda.</p>
+        ) : (
+          <div className="tf-lesson-grid">
+            {catVideos.map((v) => (
+              <VideoCard key={v.id} video={v} onPlay={() => setPlayingVideo(v)} />
+            ))}
+          </div>
+        )}
+        {playingVideo && <VideoPlayerModal video={playingVideo} onClose={() => setPlayingVideo(null)} />}
+      </div>
+    );
+  }
+
+  // Nenhuma categoria aberta: mostra a "prateleira" de categorias — clicar entra na categoria
+  return (
+    <div className="tf-category-grid">
+      {visibleCategories.map((cat) => {
+        const count = videos.filter((v) => v.category_id === cat.id && (isOwnerAccount || v.status === "ready")).length;
+        return <CategoryFolderCard key={cat.id} category={cat} count={count} onOpen={() => setOpenCategoryId(cat.id)} />;
       })}
-      {playingVideo && <VideoPlayerModal video={playingVideo} onClose={() => setPlayingVideo(null)} />}
     </div>
+  );
+}
+
+function CategoryFolderCard({ category, count, onOpen }) {
+  return (
+    <button type="button" className="tf-category-folder" onClick={onOpen}>
+      <div className={`tf-category-banner ${category.cover_url ? "" : "tf-category-banner-empty"}`}>
+        {category.cover_url && <img src={category.cover_url} alt="" />}
+        <div className="tf-category-banner-overlay">
+          <div>
+            <h3>{category.name}</h3>
+            {category.description && <p>{category.description}</p>}
+          </div>
+        </div>
+      </div>
+      <div className="tf-category-folder-count">
+        <PlayCircle size={12} /> {count} {count === 1 ? "aula" : "aulas"}
+      </div>
+    </button>
   );
 }
 
@@ -5353,6 +5385,17 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-category-cover-preview img{ width:100%; height:100%; object-fit:cover; display:block; }
 .tf-category-cover-preview-sm{ width:30px; height:30px; border-radius:6px; }
 
+/* Painel do Aluno — prateleira de categorias (pastas) e aulas de dentro de cada uma */
+.tf-category-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:18px; }
+.tf-category-folder{ background:none; border:none; padding:0; margin:0; text-align:left; cursor:pointer; font-family:inherit; color:var(--text); display:flex; flex-direction:column; gap:8px; }
+.tf-category-folder .tf-category-banner{ margin-bottom:0; border:1px solid var(--border); transition:border-color .15s, transform .15s; }
+.tf-category-folder:hover .tf-category-banner{ border-color:var(--lime); transform:translateY(-2px); }
+.tf-category-folder-count{ display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); padding-left:2px; }
+.tf-cat-back{ display:inline-flex; align-items:center; gap:4px; background:none; border:none; color:var(--muted); font-size:13px; font-weight:600; cursor:pointer; padding:0 0 14px; font-family:inherit; }
+.tf-cat-back:hover{ color:var(--text); }
+.tf-lesson-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; margin-top:16px; }
+.tf-lesson-grid .tf-netflix-card{ flex:none; }
+
 /* Tablet e celular grande */
 @media (max-width: 900px) {
   .tf-netflix-card{ flex-basis:170px; }
@@ -5368,6 +5411,8 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-category-banner-overlay{ padding:10px 14px; }
   .tf-category-banner-overlay h3{ font-size:13.5px; }
   .tf-category-banner-overlay p{ font-size:11px; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+  .tf-category-grid{ grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; }
+  .tf-lesson-grid{ grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; }
 }
 
 /* Celular pequeno */
