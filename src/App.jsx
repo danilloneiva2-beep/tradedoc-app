@@ -12,7 +12,7 @@ import {
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
   Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
-  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon,
+  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -133,6 +133,7 @@ function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, 
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "calendar", label: "Calendário", icon: CalendarDays },
     ...(hasStudentPanelAccess ? [{ id: "painel-aluno", label: "Painel do Aluno", icon: PlayCircle }] : []),
+    ...(isOwnerAccount ? [{ id: "resultados-alunos", label: "Resultados dos Alunos", icon: BarChart3 }] : []),
     { id: "mindset", label: "Mente de Trader", icon: Brain },
     { id: "propdesk", label: "Gerenciamento Mesa Prop", icon: ShieldCheck },
     ...(isMentorBetaTester ? [{ id: "mentors", label: "Mentores", icon: Users, badge: "Beta" }] : []),
@@ -706,7 +707,7 @@ function AccountFilterDropdown({ accounts, selected, onChange }) {
   );
 }
 
-function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter }) {
+function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter, canShareWithMentor, onShareWithMentor }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
   return (
     <div className="tf-view">
@@ -806,6 +807,16 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
           </div>
         </div>
       </div>
+
+      {canShareWithMentor && (
+        <div className="tf-card tf-share-card">
+          <div>
+            <h3>Compartilhar com seu mentor</h3>
+            <p className="tf-muted">Envie seus resultados de um dia, semana ou mês (com anotações e prints) para o seu mentor analisar.</p>
+          </div>
+          <button type="button" className="tf-btn-primary" onClick={onShareWithMentor}><Share2 size={15} /> Compartilhar com seu mentor</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3628,6 +3639,7 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [accountFilter, setAccountFilter] = useState([]); // [] = todas as contas
   const [theme, setTheme] = useState(() => {
@@ -3895,22 +3907,25 @@ export default function App() {
   // OU um aluno que o dono liberou manualmente E que tem assinatura Tradefy ativa.
   const hasStudentPanelAccess = isOwnerAccount || (!!studentAccess && hasActiveAccess);
   const isMentorBetaTester = !!profile?.is_mentor_beta;
+  // Botão "Compartilhar com seu mentor": só pra aluno liberado pelo mentor (nunca pro próprio dono)
+  const canShareWithMentor = hasStudentPanelAccess && !isOwnerAccount;
 
   const view = (() => {
     switch (active) {
-      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
+      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
-      case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
+      case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "mentors": return <MentoresView session={session} isMentorBetaTester={isMentorBetaTester} />;
       case "ranking": return <RankingView session={session} />;
+      case "resultados-alunos": return isOwnerAccount ? <StudentResultsView /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "mindset": return <MindsetView trades={trades} isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currency={profile?.currency || "BRL"} onUpdateCurrency={handleUpdateCurrency} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} />;
-      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} />;
+      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
     }
   })();
 
@@ -3952,6 +3967,7 @@ export default function App() {
           />
           {view}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
+          {showShareModal && canShareWithMentor && <ShareWithMentorModal session={session} accounts={accounts} trades={trades} onClose={() => setShowShareModal(false)} />}
           {showImportModal && <ImportTradesModal onClose={() => setShowImportModal(false)} onImport={handleImportTrades} accounts={accounts} />}
           {editingTrade && (
             <NewTradeModal
@@ -4022,6 +4038,564 @@ function CoverUploadButton({ onUploaded, title = "Trocar capa", className = "tf-
         {uploading ? <Loader2 size={13} className="tf-spin" /> : <ImageIcon size={13} />}
       </label>
     </>
+  );
+}
+
+/* ---------------- Compartilhar resultados com o mentor ---------------- */
+
+const SHARE_PERIOD_LABELS = { daily: "Diário", weekly: "Semanal", monthly: "Mensal" };
+
+function isoFromDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function addDaysISO(iso, n) {
+  const d = parseLocalDate(iso);
+  d.setDate(d.getDate() + n);
+  return isoFromDate(d);
+}
+
+function fmtDateBR(iso) {
+  if (!iso) return "";
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+}
+
+// Semana = segunda a domingo, a partir de qualquer dia escolhido
+function weekRangeFor(iso) {
+  const d = parseLocalDate(iso);
+  const dow = d.getDay();
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  const start = addDaysISO(iso, diffToMonday);
+  return { start, end: addDaysISO(start, 6) };
+}
+
+function monthRangeFor(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return { start: `${ym}-01`, end: `${ym}-${String(last).padStart(2, "0")}` };
+}
+
+function shareRangeFor(type, dateValue, monthValue) {
+  if (type === "monthly") return monthValue ? monthRangeFor(monthValue) : null;
+  if (!dateValue) return null;
+  if (type === "weekly") return weekRangeFor(dateValue);
+  return { start: dateValue, end: dateValue };
+}
+
+function sharePeriodLabel(share) {
+  if (share.period_type === "daily") return fmtDateBR(share.period_start);
+  if (share.period_type === "weekly") return `Semana de ${fmtDateBR(share.period_start)} a ${fmtDateBR(share.period_end)}`;
+  const monthIdx = Number(share.period_start.slice(5, 7)) - 1;
+  return `${MONTH_LABELS[monthIdx]} de ${share.period_start.slice(0, 4)}`;
+}
+
+function ShareWithMentorModal({ session, accounts, trades, onClose }) {
+  const today = isoFromDate(new Date());
+  const [type, setType] = useState("daily");
+  const [dateValue, setDateValue] = useState(today);
+  const [monthValue, setMonthValue] = useState(today.slice(0, 7));
+  const [selectedIds, setSelectedIds] = useState(() => accounts.map((a) => String(a.id)));
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const [myShares, setMyShares] = useState([]);
+
+  const loadMyShares = async () => {
+    const { data } = await supabase
+      .from("student_shares")
+      .select("*")
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    setMyShares(data || []);
+  };
+
+  useEffect(() => { loadMyShares(); }, []);
+
+  const range = shareRangeFor(type, dateValue, monthValue);
+
+  const sharedTrades = useMemo(() => {
+    if (!range) return [];
+    const ids = new Set(selectedIds);
+    return trades.filter((t) => {
+      const d = String(t.trade_date).slice(0, 10);
+      return ids.has(String(t.account_id)) && d >= range.start && d <= range.end;
+    });
+  }, [trades, selectedIds, range?.start, range?.end]);
+
+  const totalPnL = sharedTrades.reduce((s, t) => s + Number(t.pnl), 0);
+  const withExtras = sharedTrades.filter((t) => t.notes || t.screenshot_path).length;
+
+  const toggleAccount = (id) => {
+    const key = String(id);
+    setSelectedIds((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]));
+  };
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!range || selectedIds.length === 0 || sharedTrades.length === 0) return;
+    setSaving(true);
+    setError("");
+    const { error: insertError } = await supabase.from("student_shares").insert({
+      user_id: session.user.id,
+      period_type: type,
+      period_start: range.start,
+      period_end: range.end,
+      account_ids: selectedIds,
+      note: note.trim() || null,
+    });
+    setSaving(false);
+    if (insertError) {
+      console.error(insertError);
+      setError(
+        /row-level security|policy/i.test(insertError.message || "")
+          ? "Não consegui enviar: seu acesso ao Painel do Aluno precisa estar ativo (e com assinatura ativa) para compartilhar com o mentor."
+          : "Não consegui enviar: " + insertError.message
+      );
+      return;
+    }
+    setSent(true);
+    setNote("");
+    await loadMyShares();
+  };
+
+  const handleRetract = async (share) => {
+    if (!window.confirm("Retirar esse envio? O mentor deixa de ver esses resultados imediatamente.")) return;
+    const { error: delError } = await supabase.from("student_shares").delete().eq("id", share.id).eq("user_id", session.user.id);
+    if (delError) { alert("Não consegui retirar o envio: " + delError.message); return; }
+    await loadMyShares();
+  };
+
+  const accountName = (id) => accounts.find((a) => String(a.id) === String(id))?.name || "Conta";
+
+  return (
+    <div className="tf-modal-overlay" onClick={onClose}>
+      <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()}>
+        <div className="tf-modal-head">
+          <h3>Compartilhar com seu mentor</h3>
+          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        {sent ? (
+          <div className="tf-share-success">
+            <div className="tf-share-success-icon"><Check size={22} /></div>
+            <h4>Resultados enviados!</h4>
+            <p className="tf-muted">Seu mentor já consegue ver o período que você escolheu. Você pode retirar o envio a qualquer momento abaixo.</p>
+            <button type="button" className="tf-btn-outline" onClick={() => setSent(false)}>Fazer outro envio</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSend} className="tf-form">
+            <p className="tf-muted" style={{ fontSize: 12.5, margin: 0 }}>
+              Escolha o período e as contas que quer mostrar. O mentor só vê o que você enviar aqui — nada fica ligado para sempre.
+            </p>
+
+            <div className="tf-form-row">
+              <label>Período</label>
+              <div className="tf-toggle-group">
+                {Object.entries(SHARE_PERIOD_LABELS).map(([key, label]) => (
+                  <button type="button" key={key} className={type === key ? "active" : ""} onClick={() => setType(key)}>{label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="tf-form-row">
+              <label>{type === "monthly" ? "Mês" : type === "weekly" ? "Escolha um dia da semana desejada" : "Dia"}</label>
+              {type === "monthly" ? (
+                <input type="month" value={monthValue} max={today.slice(0, 7)} onChange={(e) => setMonthValue(e.target.value)} required />
+              ) : (
+                <input type="date" value={dateValue} max={today} onChange={(e) => setDateValue(e.target.value)} required />
+              )}
+              {type === "weekly" && range && (
+                <span className="tf-muted" style={{ fontSize: 12 }}>Será enviada a semana de {fmtDateBR(range.start)} a {fmtDateBR(range.end)} (segunda a domingo).</span>
+              )}
+            </div>
+
+            <div className="tf-share-field">
+              <span className="tf-share-field-label">Contas que serão compartilhadas</span>
+              <div className="tf-share-accounts">
+                {accounts.map((a) => (
+                  <label key={a.id} className="tf-share-account">
+                    <input type="checkbox" checked={selectedIds.includes(String(a.id))} onChange={() => toggleAccount(a.id)} />
+                    <span className="tf-share-account-name">{a.name}</span>
+                    {a.type && <span className="tf-muted tf-share-account-type">{a.type}</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="tf-form-row">
+              <label>Mensagem para o mentor (opcional)</label>
+              <textarea className="tf-textarea" rows={2} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Ex: Tive dificuldade com as entradas na abertura, queria sua opinião." />
+            </div>
+
+            <div className="tf-share-preview">
+              <div>
+                <span className="tf-muted">Será enviado</span>
+                <strong>{sharedTrades.length} {sharedTrades.length === 1 ? "trade" : "trades"}</strong>
+                {withExtras > 0 && <span className="tf-muted"> · {withExtras} com anotação ou print</span>}
+              </div>
+              <span className={`tf-mono ${totalPnL >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(totalPnL)}</span>
+            </div>
+            {sharedTrades.length === 0 && (
+              <p className="tf-muted" style={{ fontSize: 12, margin: 0 }}>Nenhum trade encontrado nesse período e nessas contas.</p>
+            )}
+
+            {error && <div className="tf-share-error">{error}</div>}
+
+            <button className="tf-btn-primary tf-form-submit" disabled={saving || sharedTrades.length === 0 || selectedIds.length === 0}>
+              <Share2 size={15} /> {saving ? "Enviando..." : "Enviar para o mentor"}
+            </button>
+          </form>
+        )}
+
+        {myShares.length > 0 && (
+          <div className="tf-share-history">
+            <h4>Seus envios recentes</h4>
+            {myShares.map((s) => (
+              <div className="tf-share-history-row" key={s.id}>
+                <div>
+                  <div className="tf-share-history-title">{sharePeriodLabel(s)}</div>
+                  <div className="tf-muted tf-share-history-sub">
+                    {SHARE_PERIOD_LABELS[s.period_type]} · {(s.account_ids || []).map(accountName).join(", ")} · enviado em {fmtDateBR(String(s.created_at).slice(0, 10))}
+                  </div>
+                </div>
+                <button type="button" className="tf-row-action tf-row-action-danger" title="Retirar envio" onClick={() => handleRetract(s)}><Trash2 size={13} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ----------- Mentor: aba "Resultados dos Alunos" ----------- */
+
+function computeShareStats(trades) {
+  const sorted = [...trades].sort((a, b) => parseLocalDate(a.trade_date) - parseLocalDate(b.trade_date));
+  const total = sorted.reduce((s, t) => s + Number(t.pnl), 0);
+  const wins = sorted.filter((t) => Number(t.pnl) > 0);
+  const losses = sorted.filter((t) => Number(t.pnl) < 0);
+  const grossWin = wins.reduce((s, t) => s + Number(t.pnl), 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + Number(t.pnl), 0));
+  const avgWin = wins.length ? grossWin / wins.length : 0;
+  const avgLoss = losses.length ? grossLoss / losses.length : 0;
+
+  // Curva do período: resultado acumulado (começa em zero) e drawdown em valor
+  let running = 0;
+  let peak = 0;
+  let maxDD = 0;
+  const curve = [{ d: "início", eq: 0 }];
+  sorted.forEach((t) => {
+    running += Number(t.pnl);
+    peak = Math.max(peak, running);
+    maxDD = Math.min(maxDD, running - peak);
+    curve.push({ d: `${t.trade_date.slice(8, 10)}/${t.trade_date.slice(5, 7)}`, eq: running });
+  });
+
+  const assetMap = {};
+  sorted.forEach((t) => {
+    if (!assetMap[t.asset]) assetMap[t.asset] = { asset: t.asset, trades: 0, wins: 0, pnl: 0 };
+    assetMap[t.asset].trades += 1;
+    if (Number(t.pnl) > 0) assetMap[t.asset].wins += 1;
+    assetMap[t.asset].pnl += Number(t.pnl);
+  });
+  const assetPerf = Object.values(assetMap)
+    .map((a) => ({ ...a, winRate: Math.round((a.wins / a.trades) * 100) }))
+    .sort((a, b) => b.pnl - a.pnl);
+
+  return {
+    count: sorted.length,
+    total,
+    winRate: sorted.length ? Math.round((wins.length / sorted.length) * 100) : 0,
+    profitFactor: grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : "—",
+    payoff: avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : "—",
+    avgWin, avgLoss, maxDD, curve, assetPerf,
+    sorted,
+  };
+}
+
+function ShareDetail({ share, onBack }) {
+  const [trades, setTrades] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLoading(true);
+      const [{ data: tradesData, error: tradesError }, { data: accData }] = await Promise.all([
+        supabase.from("trades").select("*").eq("user_id", share.user_id)
+          .gte("trade_date", share.period_start).lte("trade_date", share.period_end)
+          .in("account_id", share.account_ids).order("trade_date", { ascending: false }),
+        supabase.from("accounts").select("id, name, type").in("id", share.account_ids),
+      ]);
+      if (!active) return;
+      if (tradesError) setError(tradesError.message);
+      setTrades(tradesData || []);
+      setAccounts(accData || []);
+      setLoading(false);
+      if (!share.mentor_seen_at) {
+        await supabase.from("student_shares").update({ mentor_seen_at: new Date().toISOString() }).eq("id", share.id);
+      }
+    })();
+    return () => { active = false; };
+  }, [share.id]);
+
+  const stats = useMemo(() => computeShareStats(trades), [trades]);
+  const accountName = (id) => accounts.find((a) => String(a.id) === String(id))?.name || "Conta";
+  const tradesDesc = [...stats.sorted].reverse();
+
+  return (
+    <div>
+      <button type="button" className="tf-btn-outline tf-share-back" onClick={onBack}><ChevronLeft size={14} /> Voltar</button>
+
+      <div className="tf-card" style={{ marginBottom: 16 }}>
+        <div className="tf-share-detail-head">
+          <div>
+            <h3 style={{ margin: 0 }}>{share.student_name || share.student_email}</h3>
+            <p className="tf-muted" style={{ margin: "4px 0 0", fontSize: 12.5 }}>
+              {SHARE_PERIOD_LABELS[share.period_type]} · {sharePeriodLabel(share)} · Contas: {accounts.map((a) => a.name).join(", ") || "—"}
+            </p>
+          </div>
+          <span className="tf-muted" style={{ fontSize: 12 }}>Enviado em {fmtDateBR(String(share.created_at).slice(0, 10))}</span>
+        </div>
+        {share.note && <div className="tf-share-note"><strong>Mensagem do aluno:</strong> {share.note}</div>}
+      </div>
+
+      {loading ? (
+        <p className="tf-muted" style={{ textAlign: "center", padding: 24 }}>Carregando resultados...</p>
+      ) : error ? (
+        <div className="tf-share-error">Não consegui carregar os trades: {error}</div>
+      ) : (
+        <>
+          <div className="tf-stats-grid">
+            <StatCard icon={Target} label="Win rate" value={`${stats.winRate}%`} tone="up" />
+            <StatCard icon={TrendingUp} label="P&L do período" value={fmtBRL(stats.total)} tone={stats.total >= 0 ? "up" : "down"} />
+            <StatCard icon={Percent} label="Fator de lucro" value={stats.profitFactor} tone="neutral" />
+            <StatCard icon={ArrowDownRight} label="Drawdown máx." value={stats.maxDD === 0 ? "R$ 0" : fmtBRL(stats.maxDD).replace("+", "")} tone="down" sub="queda máxima no período" />
+          </div>
+          <div className="tf-stats-grid">
+            <StatCard icon={Hash} label="Nº de trades" value={stats.count} tone="neutral" />
+            <StatCard icon={ArrowUpRight} label="Ganho médio" value={fmtBRL(stats.avgWin)} tone="up" />
+            <StatCard icon={ArrowDownRight} label="Perda média" value={fmtBRL(-stats.avgLoss)} tone="down" />
+            <StatCard icon={Scale} label="Payoff" value={stats.payoff} tone="neutral" sub="ganho médio ÷ perda média" />
+          </div>
+
+          {stats.count > 0 && (
+            <div className="tf-card tf-hero-chart">
+              <div className="tf-card-head">
+                <div><h3>Resultado acumulado no período</h3></div>
+                <div className={`tf-hero-value ${stats.total >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(stats.total)}</div>
+              </div>
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={stats.curve} margin={{ top: 10, right: 8, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="shareFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#22C55E" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#2563EB" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#1C2537" vertical={false} />
+                  <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [fmtBRL(v), "Acumulado"]} />
+                  <Area type="monotone" dataKey="eq" stroke="#22C55E" strokeWidth={2.5} fill="url(#shareFill)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <div className="tf-two-col">
+            <div className="tf-card">
+              <div className="tf-card-head"><h3>Análise por ativo</h3></div>
+              <div className="tf-table">
+                <div className="tf-table-row tf-table-head"><span>Ativo</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
+                {stats.assetPerf.length === 0 && <div className="tf-empty">Nenhum trade nesse período.</div>}
+                {stats.assetPerf.map((a) => (
+                  <div className="tf-asset-block" key={a.asset}>
+                    <div className="tf-table-row">
+                      <span className="tf-mono tf-asset">{a.asset}</span>
+                      <span className="tf-mono tf-muted">{a.trades}</span>
+                      <span className="tf-mono">{a.winRate}%</span>
+                      <span className={`tf-mono ${a.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(a.pnl)}</span>
+                    </div>
+                    <div className="tf-asset-bar-track"><div className="tf-asset-bar-fill" style={{ width: `${a.winRate}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="tf-card">
+              <div className="tf-card-head"><h3>Trades do período</h3></div>
+              <div className="tf-trade-list">
+                {tradesDesc.length === 0 && <div className="tf-empty">Nenhum trade nesse período.</div>}
+                {tradesDesc.map((t) => {
+                  const hasExtra = t.notes || t.screenshot_path;
+                  const isOpen = expandedId === t.id;
+                  return (
+                    <div key={t.id}>
+                      <div className="tf-trade-row" style={{ cursor: hasExtra ? "pointer" : "default" }} onClick={() => hasExtra && setExpandedId(isOpen ? null : t.id)}>
+                        <span className={`tf-dot ${Number(t.pnl) >= 0 ? "dot-lime" : "dot-coral"}`} />
+                        <span className="tf-muted tf-mono tf-trade-date">{t.trade_date.slice(8, 10)}/{t.trade_date.slice(5, 7)}</span>
+                        <span className="tf-asset">{t.asset}</span>
+                        <span className="tf-muted tf-trade-side">{t.side}</span>
+                        {t.mood && <span className="tf-share-mood">{t.mood}</span>}
+                        {hasExtra && <ImageIcon size={12} className="tf-muted" style={{ flexShrink: 0 }} />}
+                        <span className={`tf-mono tf-trade-pnl ${Number(t.pnl) >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                      </div>
+                      {isOpen && <TradeRowExpanded trade={t} />}
+                    </div>
+                  );
+                })}
+              </div>
+              {accounts.length > 1 && <p className="tf-muted" style={{ fontSize: 11.5, marginTop: 10 }}>Contas incluídas: {accounts.map((a) => a.name).join(", ")}</p>}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StudentResultsView() {
+  const [shares, setShares] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [selectedShareId, setSelectedShareId] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error: loadError } = await supabase.from("student_shares").select("*").order("created_at", { ascending: false });
+    if (loadError) setError(loadError.message); else setError("");
+    setShares(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const students = useMemo(() => {
+    const map = {};
+    shares.forEach((s) => {
+      if (!map[s.user_id]) map[s.user_id] = { userId: s.user_id, name: s.student_name, email: s.student_email, shares: [], unseen: 0 };
+      map[s.user_id].shares.push(s);
+      if (!s.mentor_seen_at) map[s.user_id].unseen += 1;
+    });
+    return Object.values(map).sort((a, b) => new Date(b.shares[0].created_at) - new Date(a.shares[0].created_at));
+  }, [shares]);
+
+  const markSeenLocally = (shareId) => {
+    setShares((prev) => prev.map((s) => (s.id === shareId && !s.mentor_seen_at ? { ...s, mentor_seen_at: new Date().toISOString() } : s)));
+  };
+
+  const selectedStudent = students.find((s) => s.userId === selectedUserId) || null;
+  const selectedShare = shares.find((s) => s.id === selectedShareId) || null;
+
+  const filtered = students.filter((s) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (s.name || "").toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q);
+  });
+
+  const header = (
+    <div className="tf-view-header">
+      <div><h1>Resultados dos Alunos</h1><p className="tf-muted">Resultados que seus alunos escolheram compartilhar com você</p></div>
+      <div className="tf-view-header-actions">
+        <button type="button" className="tf-btn-outline" onClick={load}><RefreshCw size={14} /> Atualizar</button>
+      </div>
+    </div>
+  );
+
+  if (selectedShare) {
+    return (
+      <div className="tf-view">
+        {header}
+        <ShareDetail
+          key={selectedShare.id}
+          share={selectedShare}
+          onBack={() => { markSeenLocally(selectedShare.id); setSelectedShareId(null); }}
+        />
+      </div>
+    );
+  }
+
+  if (selectedStudent) {
+    return (
+      <div className="tf-view">
+        {header}
+        <button type="button" className="tf-btn-outline tf-share-back" onClick={() => setSelectedUserId(null)}><ChevronLeft size={14} /> Todos os alunos</button>
+        <div className="tf-card">
+          <div className="tf-card-head">
+            <div>
+              <h3 style={{ margin: 0 }}>{selectedStudent.name || selectedStudent.email}</h3>
+              {selectedStudent.name && <p className="tf-muted" style={{ margin: "4px 0 0", fontSize: 12.5 }}>{selectedStudent.email}</p>}
+            </div>
+          </div>
+          <div className="tf-share-list">
+            {selectedStudent.shares.map((s) => (
+              <button type="button" key={s.id} className="tf-share-item" onClick={() => setSelectedShareId(s.id)}>
+                <div className="tf-share-item-main">
+                  <div className="tf-share-item-title">
+                    {sharePeriodLabel(s)}
+                    {!s.mentor_seen_at && <span className="tf-share-new">Novo</span>}
+                  </div>
+                  <div className="tf-muted tf-share-item-sub">
+                    {SHARE_PERIOD_LABELS[s.period_type]} · enviado em {fmtDateBR(String(s.created_at).slice(0, 10))}
+                    {s.note ? ` · "${s.note.length > 60 ? s.note.slice(0, 60) + "…" : s.note}"` : ""}
+                  </div>
+                </div>
+                <ChevronRight size={16} className="tf-muted" />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="tf-view">
+      {header}
+      {loading ? (
+        <p className="tf-muted" style={{ textAlign: "center", padding: 30 }}>Carregando...</p>
+      ) : error ? (
+        <div className="tf-share-error">Não consegui carregar os envios: {error}. Confira se você rodou o arquivo SQL de compartilhamento no Supabase.</div>
+      ) : students.length === 0 ? (
+        <div className="tf-card">
+          <p className="tf-empty">Nenhum aluno compartilhou resultados ainda. Quando um aluno liberado no Painel do Aluno usar o botão "Compartilhar com seu mentor" no Dashboard, ele aparece aqui.</p>
+        </div>
+      ) : (
+        <div className="tf-card">
+          <div className="tf-input-icon" style={{ marginBottom: 14 }}>
+            <Search size={15} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar aluno por nome ou e-mail" />
+          </div>
+          <div className="tf-share-list">
+            {filtered.length === 0 && <p className="tf-empty">Nenhum aluno encontrado.</p>}
+            {filtered.map((st) => (
+              <button type="button" key={st.userId} className="tf-share-item" onClick={() => setSelectedUserId(st.userId)}>
+                <div className="tf-ranking-avatar tf-ranking-avatar-b3">{(st.name || st.email || "?").charAt(0).toUpperCase()}</div>
+                <div className="tf-share-item-main">
+                  <div className="tf-share-item-title">
+                    {st.name || st.email}
+                    {st.unseen > 0 && <span className="tf-share-new">{st.unseen} {st.unseen === 1 ? "novo" : "novos"}</span>}
+                  </div>
+                  <div className="tf-muted tf-share-item-sub">
+                    {st.shares.length} {st.shares.length === 1 ? "envio" : "envios"} · último em {fmtDateBR(String(st.shares[0].created_at).slice(0, 10))}
+                  </div>
+                </div>
+                <ChevronRight size={16} className="tf-muted" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -5106,6 +5680,44 @@ const APP_STYLES = `
 .tf-screenshot-preview{width:70px; height:70px; object-fit:cover; border-radius:8px; border:1px solid var(--border);}
 .tf-screenshot-existing{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);}
 .tf-trade-expanded{padding:10px 0 12px 20px; margin-top:-4px; border-bottom:1px solid var(--border);}
+
+/* ---- Compartilhar resultados com o mentor ---- */
+.tf-modal-wide{max-width:480px;max-height:90vh;overflow-y:auto;}
+.tf-share-card{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:16px;}
+.tf-share-card h3{margin:0 0 4px;font-size:15px;font-weight:600;}
+.tf-share-card p{margin:0;font-size:12.5px;max-width:520px;}
+.tf-share-field{display:flex;flex-direction:column;gap:6px;}
+.tf-share-field-label{font-size:12px;color:var(--muted);font-weight:500;}
+.tf-share-accounts{display:flex;flex-direction:column;gap:6px;}
+.tf-share-account{display:flex;align-items:center;gap:10px;padding:9px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;color:var(--text);}
+.tf-share-account input{width:16px;height:16px;margin:0;accent-color:var(--lime);flex-shrink:0;}
+.tf-share-account-name{flex:1;font-weight:500;}
+.tf-share-account-type{font-size:11.5px;}
+.tf-share-preview{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;font-size:13px;}
+.tf-share-preview strong{margin:0 4px 0 8px;}
+.tf-share-error{padding:10px 12px;border-radius:8px;background:rgba(255,92,114,0.12);color:var(--coral);font-size:12.5px;}
+.tf-share-success{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:10px 0 6px;}
+.tf-share-success h4{margin:0;font-size:16px;}
+.tf-share-success p{margin:0 0 6px;font-size:12.5px;}
+.tf-share-success-icon{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(31,163,92,0.18);color:var(--lime);}
+.tf-share-history{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
+.tf-share-history h4{margin:0 0 8px;font-size:13px;font-weight:600;}
+.tf-share-history-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
+.tf-share-history-row:last-child{border-bottom:none;}
+.tf-share-history-title{font-size:13px;font-weight:600;}
+.tf-share-history-sub{font-size:11.5px;margin-top:2px;}
+.tf-share-back{display:inline-flex;align-items:center;gap:4px;margin-bottom:14px;}
+.tf-share-list{display:flex;flex-direction:column;gap:8px;}
+.tf-share-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-family:inherit;}
+.tf-share-item:hover{border-color:var(--lime);}
+.tf-share-item-main{flex:1;min-width:0;}
+.tf-share-item-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.tf-share-item-sub{font-size:12px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;}
+.tf-share-new{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--lime);color:#06280F;text-transform:uppercase;}
+.tf-share-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+.tf-share-note{margin-top:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:13px;line-height:1.5;}
+.tf-share-mood{font-size:10.5px;padding:2px 7px;border-radius:20px;background:var(--surface-2);border:1px solid var(--border);color:var(--muted);white-space:nowrap;}
+@media (max-width:760px){ .tf-share-card .tf-btn-primary{width:100%;justify-content:center;} }
 .tf-trade-notes{font-size:12.5px; color:var(--muted); margin:0 0 10px; white-space:pre-wrap; line-height:1.5;}
 .tf-trade-screenshot-thumb{max-width:100%; max-height:220px; border-radius:8px; border:1px solid var(--border); display:block;}
 .tf-trade-row:last-child{border-bottom:none;} .tf-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
