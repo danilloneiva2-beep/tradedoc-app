@@ -12,7 +12,7 @@ import {
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
   Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
-  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2,
+  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2, Paperclip, FileText, Download,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -4781,6 +4781,7 @@ function VideoCard({ video, onPlay }) {
       </div>
       <div className="tf-netflix-info">
         <span className="tf-video-title">{video.title}</span>
+        {video.material_path && <span className="tf-video-material-tag"><Paperclip size={11} /> Apostila</span>}
         {!isReady && (
           <span className="tf-video-status">{video.status === "error" ? "Erro no processamento" : "Processando..."}</span>
         )}
@@ -4836,8 +4837,94 @@ function VideoPlayerModal({ video, onClose }) {
             <p>{video.description}</p>
           </div>
         )}
+        {video.material_path && <MaterialDownload video={video} />}
       </div>
     </div>
+  );
+}
+
+// Apostila anexada à aula: o aluno clica e baixa (link temporário e privado)
+function MaterialDownload({ video }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleDownload = async () => {
+    setBusy(true);
+    setErr("");
+    const { data, error } = await supabase.storage
+      .from("student-materials")
+      .createSignedUrl(video.material_path, 600, { download: video.material_name || true });
+    setBusy(false);
+    if (error || !data?.signedUrl) {
+      console.error(error);
+      setErr("Não consegui abrir a apostila agora. Tenta de novo em instantes.");
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = data.signedUrl;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  return (
+    <div className="tf-material-box">
+      <div className="tf-material-box-info">
+        <FileText size={20} />
+        <div>
+          <div className="tf-material-box-title">Apostila da aula</div>
+          <div className="tf-muted tf-material-box-name">{video.material_name || "Material de apoio"}</div>
+        </div>
+      </div>
+      <button type="button" className="tf-btn-primary" disabled={busy} onClick={handleDownload}>
+        {busy ? <Loader2 size={15} className="tf-spin" /> : <Download size={15} />} {busy ? "Abrindo..." : "Baixar apostila"}
+      </button>
+      {err && <p className="text-coral" style={{ fontSize: 12.5, margin: "8px 0 0", width: "100%" }}>{err}</p>}
+    </div>
+  );
+}
+
+// Botão do dono: anexar / trocar / remover a apostila de uma aula
+function MaterialAttachButton({ video, onSelected, onRemove }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleChange = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > 50 * 1024 * 1024) { alert("Arquivo muito grande — o limite da apostila é 50MB."); return; }
+    setBusy(true);
+    try { await onSelected(f); } finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        style={{ display: "none" }}
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.txt,.png,.jpg,.jpeg"
+        onChange={handleChange}
+      />
+      {video.material_path && (
+        <span className="tf-material-chip" title={video.material_name || "Apostila"}>
+          <FileText size={12} />
+          <span className="tf-material-chip-name">{video.material_name || "Apostila"}</span>
+          <button type="button" className="tf-material-chip-x" title="Remover apostila" onClick={onRemove}><X size={11} /></button>
+        </span>
+      )}
+      <button
+        type="button"
+        className="tf-row-action"
+        title={video.material_path ? "Trocar apostila" : "Anexar apostila"}
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+      >
+        {busy ? <Loader2 size={13} className="tf-spin" /> : <Paperclip size={13} />}
+      </button>
+    </>
   );
 }
 
@@ -5034,6 +5121,27 @@ function StudentContentManager() {
       if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
       await load();
     },
+    onMaterialSelected: async (file) => {
+      const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
+      const path = `${v.id}/${Date.now()}-${safeName}`;
+      const { error: upError } = await supabase.storage.from("student-materials").upload(path, file, { upsert: false, contentType: file.type || undefined });
+      if (upError) { alert("Não consegui enviar a apostila: " + upError.message); return; }
+      const { error } = await supabase.from("student_videos").update({ material_path: path, material_name: file.name }).eq("id", v.id);
+      if (error) {
+        await supabase.storage.from("student-materials").remove([path]);
+        alert("Não consegui salvar a apostila: " + error.message);
+        return;
+      }
+      if (v.material_path) await supabase.storage.from("student-materials").remove([v.material_path]);
+      await load(true);
+    },
+    onMaterialRemove: async () => {
+      if (!window.confirm(`Remover a apostila da aula "${v.title}"?`)) return;
+      const { error } = await supabase.from("student_videos").update({ material_path: null, material_name: null }).eq("id", v.id);
+      if (error) { alert("Não consegui remover a apostila: " + error.message); return; }
+      if (v.material_path) await supabase.storage.from("student-materials").remove([v.material_path]);
+      await load(true);
+    },
   });
 
   return (
@@ -5193,7 +5301,7 @@ function StudentContentManager() {
   );
 }
 
-function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded }) {
+function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded, onMaterialSelected, onMaterialRemove }) {
   if (isEditing) {
     return (
       <div className="tf-mentor-edit-row">
@@ -5234,6 +5342,7 @@ function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDe
                 ? `Processando ${syncInfo.encodeProgress}%`
                 : "Processando"}
       </span>
+      <MaterialAttachButton video={video} onSelected={onMaterialSelected} onRemove={onMaterialRemove} />
       <CoverUploadButton title="Trocar capa do vídeo" onUploaded={onCoverUploaded} />
       <button type="button" className="tf-row-action" onClick={onStartEdit} title="Editar"><Pencil size={13} /></button>
       <button type="button" className="tf-row-action tf-row-action-danger" onClick={onDelete} title="Apagar"><Trash2 size={13} /></button>
@@ -6157,6 +6266,15 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-video-player-wrap{ position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:8px; overflow:hidden; margin-top:6px; }
 .tf-video-player-wrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
 .tf-video-description{ margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+.tf-material-box{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:14px; padding:12px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; }
+.tf-material-box-info{ display:flex; align-items:center; gap:10px; min-width:0; color:var(--lime); }
+.tf-material-box-title{ font-size:13.5px; font-weight:600; color:var(--text); }
+.tf-material-box-name{ font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:240px; }
+.tf-material-chip{ display:inline-flex; align-items:center; gap:5px; max-width:150px; padding:3px 6px 3px 8px; border-radius:20px; background:var(--surface-2); border:1px solid var(--border); font-size:11px; color:var(--muted); }
+.tf-material-chip-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tf-material-chip-x{ display:inline-flex; align-items:center; justify-content:center; background:transparent; border:none; color:var(--muted); cursor:pointer; padding:2px; border-radius:50%; }
+.tf-material-chip-x:hover{ color:var(--coral); }
+.tf-video-material-tag{ display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--lime); margin-top:2px; }
 .tf-video-description p{ font-size:13.5px; line-height:1.55; color:var(--text); white-space:pre-wrap; margin:0; }
 
 @media (max-width: 640px) {
