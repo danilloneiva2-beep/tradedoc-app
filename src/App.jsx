@@ -5198,7 +5198,18 @@ function VideoUploadForm({ categoryId, moduleId, onDone }) {
       const { data, error } = await supabase.functions.invoke("bunny-stream", {
         body: { action: "create-video", title: title.trim(), description: description.trim() || null, category_id: categoryId, module_id: moduleId || null },
       });
-      if (error || data?.error) throw new Error(data?.error || error.message);
+      if (error || data?.error) {
+        // Quando a função responde com erro, o supabase só mostra uma frase genérica.
+        // Aqui puxamos a mensagem real que a função mandou, pra saber o que houve.
+        let detail = data?.error || error.message;
+        if (!data?.error && error?.context && typeof error.context.json === "function") {
+          try {
+            const body = await error.context.json();
+            if (body?.error) detail = body.error;
+          } catch (_) { /* mantém a mensagem genérica */ }
+        }
+        throw new Error(detail);
+      }
 
       const { videoId, libraryId, authorizationSignature, authorizationExpire } = data;
 
