@@ -4630,6 +4630,21 @@ function StudentPanelView({ session, isOwnerAccount }) {
   );
 }
 
+// Pergunta ao Bunny (pela função bunny-stream) qual o status real dos vídeos que
+// ainda estão "Processando" e atualiza o banco. É uma rede de segurança: mesmo
+// que o aviso automático (webhook) do Bunny falhe, os vídeos prontos passam
+// pra "Pronto" sozinhos assim que alguém abre o Painel do Aluno.
+async function syncVideoStatuses() {
+  try {
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "sync-status" } });
+    if (error || data?.error) return { changed: false, videos: [] };
+    const list = data?.videos || [];
+    return { changed: list.some((v) => v.status !== "processing"), videos: list };
+  } catch (_) {
+    return { changed: false, videos: [] };
+  }
+}
+
 function StudentLessonsList({ isOwnerAccount }) {
   const [categories, setCategories] = useState([]);
   const [modules, setModules] = useState([]);
@@ -4637,8 +4652,8 @@ function StudentLessonsList({ isOwnerAccount }) {
   const [loading, setLoading] = useState(true);
   const [playingVideo, setPlayingVideo] = useState(null);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     const { data: cats } = await supabase.from("student_categories").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     const { data: mods } = await supabase.from("student_modules").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     const { data: vids } = await supabase.from("student_videos").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
@@ -4648,7 +4663,11 @@ function StudentLessonsList({ isOwnerAccount }) {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Confere no Bunny se algum vídeo "Processando" já ficou pronto; se sim, recarrega a lista.
+    syncVideoStatuses().then((r) => { if (r.changed) load(true); });
+  }, []);
 
   if (loading) return <p className="tf-muted" style={{ textAlign: "center", padding: 30 }}>Carregando aulas...</p>;
 
@@ -4847,9 +4866,11 @@ function StudentContentManager() {
   const [editModName, setEditModName] = useState("");
   const [editModDesc, setEditModDesc] = useState("");
   const [uploadModuleId, setUploadModuleId] = useState(null);
+  const [syncInfo, setSyncInfo] = useState({}); // id do vídeo -> detalhe do status vindo do Bunny
+  const [syncing, setSyncing] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     const { data: cats } = await supabase.from("student_categories").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     const { data: mods } = await supabase.from("student_modules").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
     const { data: vids } = await supabase.from("student_videos").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
@@ -4859,7 +4880,28 @@ function StudentContentManager() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  // Consulta o Bunny e atualiza o status dos vídeos que ainda estão "Processando"
+  const refreshStatuses = async () => {
+    setSyncing(true);
+    const r = await syncVideoStatuses();
+    const info = {};
+    r.videos.forEach((v) => { info[v.id] = v; });
+    setSyncInfo(info);
+    if (r.changed) await load(true);
+    setSyncing(false);
+  };
+
+  useEffect(() => {
+    load().then(() => refreshStatuses());
+  }, []);
+
+  // Enquanto houver vídeo "Processando", confere de novo a cada 20 segundos
+  const hasProcessing = videos.some((v) => v.status === "processing");
+  useEffect(() => {
+    if (!hasProcessing) return undefined;
+    const t = setInterval(() => { refreshStatuses(); }, 20000);
+    return () => clearInterval(t);
+  }, [hasProcessing]);
 
   const handleCreateCategory = async (e) => {
     e.preventDefault();
@@ -4980,6 +5022,7 @@ function StudentContentManager() {
 
   const videoRowProps = (v) => ({
     video: v,
+    syncInfo: syncInfo[v.id],
     isEditing: editingVideoId === v.id,
     editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo,
     onStartEdit: () => startEditVideo(v),
@@ -4998,9 +5041,14 @@ function StudentContentManager() {
       <div className="tf-card">
         <div className="tf-card-head">
           <h3>Categorias</h3>
-          <button type="button" className="tf-btn-outline" onClick={() => setShowNewCategory((s) => !s)}>
-            <FolderPlus size={14} /> Nova categoria
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="tf-btn-outline" disabled={syncing} onClick={refreshStatuses}>
+              <RefreshCw size={14} /> {syncing ? "Conferindo..." : "Atualizar status"}
+            </button>
+            <button type="button" className="tf-btn-outline" onClick={() => setShowNewCategory((s) => !s)}>
+              <FolderPlus size={14} /> Nova categoria
+            </button>
+          </div>
         </div>
 
         {showNewCategory && (
@@ -5145,7 +5193,7 @@ function StudentContentManager() {
   );
 }
 
-function VideoAdminRow({ video, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded }) {
+function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded }) {
   if (isEditing) {
     return (
       <div className="tf-mentor-edit-row">
@@ -5164,8 +5212,27 @@ function VideoAdminRow({ video, isEditing, editVideoTitle, editVideoDesc, setEdi
         {video.cover_url ? <img src={video.cover_url} alt="" /> : <ImageIcon size={13} className="tf-muted" />}
       </div>
       <span className="tf-asset" style={{ flex: 1 }}>{video.title}</span>
-      <span className={`tf-nav-badge ${video.status === "error" ? "tf-badge-error" : ""}`}>
-        {video.status === "ready" ? "Pronto" : video.status === "error" ? "Erro" : "Processando"}
+      <span
+        className={`tf-nav-badge ${video.status === "error" ? "tf-badge-error" : ""}`}
+        title={
+          video.status === "error"
+            ? (syncInfo?.reason === "not_found"
+                ? "Esse vídeo não existe mais no Bunny (provavelmente ficou na biblioteca antiga). Apague a aula e envie de novo."
+                : "O Bunny avisou erro ao processar esse vídeo. Apague a aula e envie de novo.")
+            : video.status === "processing" && syncInfo?.bunnyStatus === 0
+              ? "O Bunny criou o vídeo mas ainda não recebeu o arquivo. Se o envio foi interrompido, apague a aula e envie de novo."
+              : undefined
+        }
+      >
+        {video.status === "ready"
+          ? "Pronto"
+          : video.status === "error"
+            ? "Erro"
+            : syncInfo?.bunnyStatus === 0
+              ? "Sem arquivo"
+              : syncInfo?.encodeProgress > 0
+                ? `Processando ${syncInfo.encodeProgress}%`
+                : "Processando"}
       </span>
       <CoverUploadButton title="Trocar capa do vídeo" onUploaded={onCoverUploaded} />
       <button type="button" className="tf-row-action" onClick={onStartEdit} title="Editar"><Pencil size={13} /></button>
