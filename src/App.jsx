@@ -4637,11 +4637,20 @@ function StudentPanelView({ session, isOwnerAccount }) {
 async function syncVideoStatuses() {
   try {
     const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "sync-status" } });
-    if (error || data?.error) return { changed: false, videos: [] };
+    if (error || data?.error) {
+      let detail = data?.error || error?.message || "erro desconhecido";
+      if (!data?.error && error?.context && typeof error.context.json === "function") {
+        try {
+          const body = await error.context.json();
+          if (body?.error) detail = body.error;
+        } catch (_) { /* mantém a mensagem genérica */ }
+      }
+      return { changed: false, videos: [], error: detail };
+    }
     const list = data?.videos || [];
-    return { changed: list.some((v) => v.status !== "processing"), videos: list };
-  } catch (_) {
-    return { changed: false, videos: [] };
+    return { changed: list.some((v) => v.status !== "processing"), videos: list, error: null };
+  } catch (e) {
+    return { changed: false, videos: [], error: e?.message || "falha de conexão" };
   }
 }
 
@@ -4955,6 +4964,7 @@ function StudentContentManager() {
   const [uploadModuleId, setUploadModuleId] = useState(null);
   const [syncInfo, setSyncInfo] = useState({}); // id do vídeo -> detalhe do status vindo do Bunny
   const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -4974,6 +4984,7 @@ function StudentContentManager() {
     const info = {};
     r.videos.forEach((v) => { info[v.id] = v; });
     setSyncInfo(info);
+    setSyncError(r.error || "");
     if (r.changed) await load(true);
     setSyncing(false);
   };
@@ -4982,11 +4993,11 @@ function StudentContentManager() {
     load().then(() => refreshStatuses());
   }, []);
 
-  // Enquanto houver vídeo "Processando", confere de novo a cada 20 segundos
+  // Enquanto houver vídeo "Processando", confere de novo a cada 10 segundos
   const hasProcessing = videos.some((v) => v.status === "processing");
   useEffect(() => {
     if (!hasProcessing) return undefined;
-    const t = setInterval(() => { refreshStatuses(); }, 20000);
+    const t = setInterval(() => { refreshStatuses(); }, 10000);
     return () => clearInterval(t);
   }, [hasProcessing]);
 
@@ -5158,6 +5169,12 @@ function StudentContentManager() {
             </button>
           </div>
         </div>
+
+        {syncError && (
+          <div className="tf-share-error" style={{ marginBottom: 12 }}>
+            Não consegui conferir o status dos vídeos no Bunny: {syncError}. Se aparecer algo como "ação desconhecida", a função bunny-stream no Supabase está desatualizada: cole o arquivo novo e clique em Deploy.
+          </div>
+        )}
 
         {showNewCategory && (
           <form className="tf-form" onSubmit={handleCreateCategory} style={{ marginBottom: 16 }}>
