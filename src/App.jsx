@@ -1549,26 +1549,53 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade
 const WEEKDAY_LABELS = ["dom","seg","ter","qua","qui","sex","sáb"];
 const MONTH_LABELS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
-function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade }) {
+const MOOD_COLORS = { Calmo: "#22C55E", Confiante: "#3B82F6", Ansioso: "#F59E0B", Ganancioso: "#A855F7", Frustrado: "#FF5C72" };
+
+function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade, dailyGoal, dailyStop, monthlyGoal, onSaveMonthlyGoal }) {
   const [monthDate, setMonthDate] = useState(new Date());
-  const [selectedDay, setSelectedDay] = useState(null);
+  const [pickedDay, setPickedDay] = useState(null);
   const [addingForDay, setAddingForDay] = useState(null);
+  const [mode, setMode] = useState("pnl"); // pnl | ops | win
+  const [expandedId, setExpandedId] = useState(null);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalInput, setGoalInput] = useState("");
+  const [savingGoal, setSavingGoal] = useState(false);
 
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const startWeekday = new Date(year, month, 1).getDay();
   const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const prevDate = new Date(year, month - 1, 1);
+  const prevPrefix = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+  const todayStr = localDateStr();
+  const isCurrentMonth = todayStr.startsWith(monthPrefix);
+  const goMonth = (delta) => { setMonthDate(new Date(year, month + delta, 1)); setPickedDay(null); setExpandedId(null); };
 
-  const monthTrades = trades.filter((t) => t.trade_date.startsWith(monthPrefix));
+  const monthTrades = useMemo(() => trades.filter((t) => t.trade_date.startsWith(monthPrefix)), [trades, monthPrefix]);
+  const prevTrades = useMemo(() => trades.filter((t) => t.trade_date.startsWith(prevPrefix)), [trades, prevPrefix]);
+
+  // Resumo de cada dia do mês: resultado, nº de operações, acertos e humor mais frequente
+  const dayStats = useMemo(() => {
+    const m = {};
+    monthTrades.forEach((t) => {
+      const day = Number(t.trade_date.slice(8, 10));
+      const s = (m[day] = m[day] || { pnl: 0, n: 0, wins: 0, moods: {} });
+      s.pnl += Number(t.pnl);
+      s.n += 1;
+      if (Number(t.pnl) > 0) s.wins += 1;
+      if (t.mood) s.moods[t.mood] = (s.moods[t.mood] || 0) + 1;
+    });
+    Object.values(m).forEach((s) => {
+      s.mood = Object.entries(s.moods).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    });
+    return m;
+  }, [monthTrades]);
+
   const calendarPnL = {};
-  monthTrades.forEach((t) => {
-    const day = Number(t.trade_date.slice(8, 10));
-    calendarPnL[day] = (calendarPnL[day] || 0) + Number(t.pnl);
-  });
-  const monthTotal = Object.values(calendarPnL).reduce((s, v) => s + v, 0);
+  Object.keys(dayStats).forEach((d) => { calendarPnL[d] = dayStats[d].pnl; });
+  const monthTotal = Object.values(dayStats).reduce((s, v) => s + v.pnl, 0);
 
-  // Métricas reais do mês, calculadas a partir dos trades cadastrados
   const monthWins = monthTrades.filter((t) => Number(t.pnl) > 0);
   const monthLosses = monthTrades.filter((t) => Number(t.pnl) < 0);
   const monthWinRate = monthTrades.length ? Math.round((monthWins.length / monthTrades.length) * 100) : 0;
@@ -1585,15 +1612,54 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
     return { d: t.trade_date.slice(8, 10), eq: runningEq };
   });
 
-  const dailyPerf = Object.keys(calendarPnL)
+  const dailyPerf = Object.keys(dayStats)
     .map(Number)
     .sort((a, b) => a - b)
-    .map((d) => ({ day: d, pnl: calendarPnL[d] }));
+    .map((d) => ({ day: d, pnl: dayStats[d].pnl }));
   const maxAbsDaily = Math.max(1, ...dailyPerf.map((d) => Math.abs(d.pnl)));
 
+  // ---- Destaques do mês ----
+  const bestDay = dailyPerf.length ? dailyPerf.reduce((a, b) => (b.pnl > a.pnl ? b : a)) : null;
+  const worstDay = dailyPerf.length ? dailyPerf.reduce((a, b) => (b.pnl < a.pnl ? b : a)) : null;
+  const greenDays = dailyPerf.filter((d) => d.pnl > 0).length;
+  const redDays = dailyPerf.filter((d) => d.pnl < 0).length;
+  let streak = 0, streakSign = 0;
+  for (let i = dailyPerf.length - 1; i >= 0; i--) {
+    const sign = dailyPerf[i].pnl > 0 ? 1 : dailyPerf[i].pnl < 0 ? -1 : 0;
+    if (sign === 0) break;
+    if (streak === 0) { streakSign = sign; streak = 1; }
+    else if (sign === streakSign) streak += 1;
+    else break;
+  }
+  const prevTotal = prevTrades.reduce((s, t) => s + Number(t.pnl), 0);
+  const prevWinRate = prevTrades.length ? Math.round((prevTrades.filter((t) => Number(t.pnl) > 0).length / prevTrades.length) * 100) : null;
+  const vsPrev = prevTrades.length && prevTotal !== 0 ? Math.round(((monthTotal - prevTotal) / Math.abs(prevTotal)) * 100) : null;
+  const winDiff = prevWinRate !== null && monthTrades.length ? monthWinRate - prevWinRate : null;
+
+  // ---- Meta do mês e projeção (só nos dias úteis) ----
+  const goalValue = Number(monthlyGoal) > 0 ? Number(monthlyGoal) : 0;
+  const goalPct = goalValue ? Math.max(0, Math.min(100, (Math.max(monthTotal, 0) / goalValue) * 100)) : 0;
+  const weekdaysIn = (from, to) => { let c = 0; for (let d = from; d <= to; d++) { const w = new Date(year, month, d).getDay(); if (w !== 0 && w !== 6) c++; } return c; };
+  const todayNum = isCurrentMonth ? Number(todayStr.slice(8, 10)) : 0;
+  const elapsedBiz = isCurrentMonth ? weekdaysIn(1, todayNum) : 0;
+  const totalBiz = weekdaysIn(1, daysInMonth);
+  const projection = isCurrentMonth && elapsedBiz > 0 && monthTrades.length > 0 ? (monthTotal / elapsedBiz) * totalBiz : null;
+
+  const saveGoal = async () => {
+    const n = parseFloat(String(goalInput).replace(/\./g, "").replace(",", "."));
+    setSavingGoal(true);
+    await onSaveMonthlyGoal(n > 0 ? n : null);
+    setSavingGoal(false);
+    setEditingGoal(false);
+  };
+
+  // ---- Grade do calendário (7 dias + total da semana) ----
   const cells = [];
   for (let i = 0; i < startWeekday; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   const intensity = (v) => {
     if (v === undefined) return "empty";
@@ -1604,58 +1670,104 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
   };
 
   const dayKey = (d) => `${monthPrefix}-${String(d).padStart(2, "0")}`;
+  const defaultDay = isCurrentMonth ? todayNum : (dailyPerf.length ? dailyPerf[dailyPerf.length - 1].day : null);
+  const selectedDay = pickedDay || defaultDay;
   const selectedDayTrades = selectedDay ? trades.filter((t) => t.trade_date === dayKey(selectedDay)) : [];
+  const selectedTotal = selectedDayTrades.reduce((s, t) => s + Number(t.pnl), 0);
+  const selectedWins = selectedDayTrades.filter((t) => Number(t.pnl) > 0).length;
+  const hasGoal = Number(dailyGoal) > 0;
+  const hasStop = Number(dailyStop) > 0;
+  const selectedWeekday = selectedDay ? ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"][new Date(year, month, selectedDay).getDay()] : "";
+  const cellText = (s) => (mode === "ops" ? `${s.n} op.` : mode === "win" ? `${Math.round((s.wins / s.n) * 100)}%` : fmtBRL(s.pnl));
+  const moodsUsed = [...new Set(Object.values(dayStats).map((s) => s.mood).filter(Boolean))];
 
   return (
     <div className="tf-view">
       <div className="tf-view-header">
         <div>
           <h1>Calendário de trades</h1>
-          <p className="tf-muted">Resultado diário consolidado · clique num dia para ver, editar ou apagar</p>
+          <p className="tf-muted">Resultado diário consolidado · clique num dia para ver os trades ao lado</p>
         </div>
         <div className="tf-month-nav">
-          <button className="tf-icon-btn" onClick={() => setMonthDate(new Date(year, month - 1, 1))}><ChevronLeft size={16} /></button>
+          <button className="tf-icon-btn" onClick={() => goMonth(-1)} aria-label="Mês anterior"><ChevronLeft size={16} /></button>
           <span className="tf-month-label">{MONTH_LABELS[month]} {year}</span>
-          <button className="tf-icon-btn" onClick={() => setMonthDate(new Date(year, month + 1, 1))}><ChevronRight size={16} /></button>
+          <button className="tf-icon-btn" onClick={() => goMonth(1)} aria-label="Próximo mês"><ChevronRight size={16} /></button>
         </div>
       </div>
 
-      <div className="tf-cal-stats-row">
-        <StatCard icon={TrendingUp} label="Resultado total do mês" value={fmtBRL(monthTotal)} tone={monthTotal >= 0 ? "up" : "down"} />
-        <StatCard icon={Target} label="Taxa de acerto do mês" value={`${monthWinRate}%`} tone="up" />
-        <StatCard icon={Hash} label="Operações do mês" value={monthTrades.length} tone="neutral" />
-        <StatCard icon={Scale} label="RR (ratio) do mês" value={monthRR} tone="neutral" />
-        <StatCard icon={ArrowUpRight} label="Lucro bruto do mês" value={fmtBRL(grossWin)} tone="up" />
-        <StatCard icon={TrendingDown} label="Prejuízo bruto do mês" value={fmtBRL(-grossLoss)} tone="down" />
+      <div className="tf-cal-mini-row">
+        <div className="tf-cal-mini"><small>Resultado do mês</small><b className={`tf-mono ${monthTotal >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(monthTotal)}</b></div>
+        <div className="tf-cal-mini"><small>Taxa de acerto</small><b className="tf-mono">{monthWinRate}%</b></div>
+        <div className="tf-cal-mini"><small>Operações</small><b className="tf-mono">{monthTrades.length}</b></div>
+        <div className="tf-cal-mini"><small>RR (ratio)</small><b className="tf-mono">{monthRR}</b></div>
+        <div className="tf-cal-mini"><small>Lucro bruto</small><b className="tf-mono text-lime">{fmtBRL(grossWin)}</b></div>
+        <div className="tf-cal-mini"><small>Prejuízo bruto</small><b className="tf-mono text-coral">{fmtBRL(-grossLoss)}</b></div>
       </div>
 
-      <div className="tf-card">
-        <div className="tf-card-head">
-          <h3>{MONTH_LABELS[month]}</h3>
-          <span className={`tf-mono ${monthTotal >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(monthTotal)}</span>
+      <div className="tf-cal-layout">
+        <div className="tf-cal-main">
+        <div className="tf-card">
+          <div className="tf-card-head tf-cal-card-head">
+            <h3>{MONTH_LABELS[month]} <span className={`tf-mono ${monthTotal >= 0 ? "text-lime" : "text-coral"}`} style={{ marginLeft: 10 }}>{fmtBRL(monthTotal)}</span></h3>
+            <div className="tf-cal-mode">
+              <span className="tf-muted tf-cal-mode-label">Mostrar:</span>
+              <div className="tf-toggle-group">
+                <button type="button" className={mode === "pnl" ? "active" : ""} onClick={() => setMode("pnl")}>Resultado</button>
+                <button type="button" className={mode === "ops" ? "active" : ""} onClick={() => setMode("ops")}>Operações</button>
+                <button type="button" className={mode === "win" ? "active" : ""} onClick={() => setMode("win")}>% Acerto</button>
+              </div>
+            </div>
+          </div>
+          <div className="tf-cal-weekdays">
+            {WEEKDAY_LABELS.map((w) => <span key={w}>{w}</span>)}
+            <span>Semana</span>
+          </div>
+          <div className="tf-cal-grid">
+            {weeks.map((week, wi) => {
+              const days = week.filter((d) => d && dayStats[d]);
+              const wTotal = days.reduce((s, d) => s + dayStats[d].pnl, 0);
+              const wOps = days.reduce((s, d) => s + dayStats[d].n, 0);
+              return (
+                <React.Fragment key={wi}>
+                  {week.map((d, i) => {
+                    const s = d ? dayStats[d] : null;
+                    const goalHit = s && hasGoal && s.pnl >= Number(dailyGoal);
+                    const stopHit = s && hasStop && s.pnl <= -Number(dailyStop);
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        disabled={!d}
+                        onClick={() => d && (setPickedDay(d), setExpandedId(null))}
+                        className={`tf-cal-cell ${d ? "has-day" : ""} ${d && d === selectedDay ? "selected" : ""} tone-${intensity(s ? s.pnl : undefined)}`}
+                      >
+                        {d && (
+                          <>
+                            <span className="tf-cal-day">{d}</span>
+                            {s && <span className="tf-cal-pnl">{cellText(s)}</span>}
+                            {(goalHit || stopHit) && <span className="tf-cal-flag" title={goalHit ? "Bateu a meta do dia" : "Estourou o stop do dia"}>{goalHit ? "🎯" : "⛔"}</span>}
+                            {s && s.mood && <span className="tf-cal-mood" title={`Humor: ${s.mood}`} style={{ background: MOOD_COLORS[s.mood] || "var(--muted)" }} />}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                  <div className={`tf-cal-week ${days.length ? (wTotal >= 0 ? "wk-up" : "wk-down") : ""}`}>
+                    <small>Semana {wi + 1}</small>
+                    <b className={`tf-mono ${days.length ? (wTotal >= 0 ? "text-lime" : "text-coral") : "tf-muted"}`}>{days.length ? fmtBRL(wTotal) : "—"}</b>
+                    <i>{days.length ? `${days.length} ${days.length === 1 ? "dia" : "dias"} · ${wOps} op.` : "sem trades"}</i>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+          <div className="tf-cal-legend">
+            {hasGoal && <span>🎯 bateu a meta do dia</span>}
+            {hasStop && <span>⛔ estourou o stop</span>}
+            {moodsUsed.map((m) => <span key={m}><i style={{ background: MOOD_COLORS[m] || "var(--muted)" }} /> {m.toLowerCase()}</span>)}
+          </div>
         </div>
-        <div className="tf-cal-weekdays">{WEEKDAY_LABELS.map((w) => <span key={w}>{w}</span>)}</div>
-        <div className="tf-cal-grid">
-          {cells.map((d, i) => (
-            <button
-              key={i}
-              type="button"
-              disabled={!d}
-              onClick={() => d && setSelectedDay(d)}
-              className={`tf-cal-cell ${d ? "has-day" : ""} tone-${intensity(calendarPnL[d])}`}
-            >
-              {d && (
-                <>
-                  <span className="tf-cal-day">{d}</span>
-                  {calendarPnL[d] !== undefined && <span className="tf-cal-pnl">{fmtBRL(calendarPnL[d])}</span>}
-                </>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
 
-      <div className="tf-two-col">
         <div className="tf-card">
           <div className="tf-card-head"><h3>Gráfico de patrimônio do mês</h3></div>
           {monthEquityCurve.length === 0 ? (
@@ -1678,13 +1790,122 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
             </ResponsiveContainer>
           )}
         </div>
+        </div>
 
+        <div className="tf-cal-side">
+          <div className="tf-card">
+            {selectedDay ? (
+              <>
+                <div className="tf-card-head">
+                  <h3>Dia {selectedDay} · {selectedWeekday}</h3>
+                  <span className={`tf-mono ${selectedTotal >= 0 ? "text-lime" : "text-coral"}`} style={{ fontWeight: 700 }}>{selectedDayTrades.length ? fmtBRL(selectedTotal) : ""}</span>
+                </div>
+                {selectedDayTrades.length > 0 ? (
+                  <>
+                    <div className="tf-trade-list" style={{ marginBottom: 10 }}>
+                      {selectedDayTrades.map((t) => {
+                        const hasExtra = t.notes || t.screenshot_path;
+                        const isOpen = expandedId === t.id;
+                        return (
+                          <div key={t.id}>
+                            <div
+                              className="tf-trade-row tf-trade-row-editable"
+                              style={{ cursor: hasExtra ? "pointer" : "default" }}
+                              onClick={() => hasExtra && setExpandedId(isOpen ? null : t.id)}
+                            >
+                              <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
+                              <span className="tf-asset">{t.trade_time ? `${t.trade_time} · ` : ""}{t.asset}</span>
+                              <span className="tf-muted tf-trade-side">{t.side}</span>
+                              {hasExtra && <FileSpreadsheet size={12} className="tf-muted" style={{ flexShrink: 0 }} />}
+                              <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                              <button type="button" className="tf-row-action" onClick={(e) => { e.stopPropagation(); onEditTrade(t); }} title="Editar"><Pencil size={13} /></button>
+                              <button type="button" className="tf-row-action tf-row-action-danger" onClick={(e) => { e.stopPropagation(); onDeleteTrade(t); }} title="Apagar"><Trash2 size={13} /></button>
+                            </div>
+                            {isOpen && <TradeRowExpanded trade={t} />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="tf-cal-day-badges">
+                      {hasGoal && selectedTotal >= Number(dailyGoal) && <span className="tf-cal-badge ok">🎯 Meta batida</span>}
+                      {hasStop && selectedTotal <= -Number(dailyStop) && <span className="tf-cal-badge bad">⛔ Stop estourado</span>}
+                      <span className="tf-muted" style={{ fontSize: 12 }}>{selectedDayTrades.length} {selectedDayTrades.length === 1 ? "operação" : "operações"} · {Math.round((selectedWins / selectedDayTrades.length) * 100)}% de acerto</span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="tf-empty" style={{ marginBottom: 10 }}>Nenhum trade registrado neste dia.</p>
+                )}
+                <button className="tf-btn-outline tf-form-submit" onClick={() => setAddingForDay(selectedDay)}><Plus size={14} /> Adicionar trade neste dia</button>
+              </>
+            ) : (
+              <>
+                <div className="tf-card-head"><h3>Dia selecionado</h3></div>
+                <p className="tf-empty">Clique num dia do calendário para ver os trades dele aqui.</p>
+              </>
+            )}
+          </div>
+
+          <div className="tf-card">
+            <div className="tf-card-head">
+              <h3>Meta do mês</h3>
+              {!editingGoal && (
+                <button type="button" className="tf-row-action" style={{ whiteSpace: "nowrap", width: "auto", height: "auto", padding: "5px 10px", gap: 6 }} onClick={() => { setGoalInput(goalValue ? String(goalValue).replace(".", ",") : ""); setEditingGoal(true); }}>
+                  <Pencil size={12} /> {goalValue ? fmtBRL(goalValue).replace("+", "") : "Definir meta"}
+                </button>
+              )}
+            </div>
+            {editingGoal ? (
+              <div className="tf-cal-goal-edit">
+                <input value={goalInput} onChange={(e) => setGoalInput(e.target.value)} inputMode="decimal" placeholder="Ex: 6000" autoFocus />
+                <button type="button" className="tf-btn-primary" disabled={savingGoal} onClick={saveGoal}>{savingGoal ? "..." : "Salvar"}</button>
+                <button type="button" className="tf-btn-outline" onClick={() => setEditingGoal(false)}>Cancelar</button>
+              </div>
+            ) : goalValue ? (
+              <>
+                <div className="tf-cal-goal-top">
+                  <b className="tf-mono">{Math.round(goalPct)}%</b>
+                  <span className="tf-muted">{monthTotal >= goalValue ? "Meta batida! 🎯" : `faltam ${fmtBRL(goalValue - monthTotal).replace("+", "")}`}</span>
+                </div>
+                <div className="tf-cal-goal-bar"><div style={{ width: `${goalPct}%` }} /></div>
+                {projection !== null ? (
+                  <p className="tf-muted" style={{ fontSize: 12, margin: 0 }}>Projeção no ritmo atual: <b className={`tf-mono ${projection >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Math.round(projection))}</b> no fim do mês</p>
+                ) : (
+                  <p className="tf-muted" style={{ fontSize: 12, margin: 0 }}>{isCurrentMonth ? "Registre trades para ver a projeção." : "Mês encerrado."}</p>
+                )}
+              </>
+            ) : (
+              <p className="tf-muted" style={{ fontSize: 13, margin: 0 }}>Defina quanto você quer ganhar no mês e acompanhe o progresso e a projeção aqui.</p>
+            )}
+          </div>
+
+          <div className="tf-card">
+            <div className="tf-card-head"><h3>Destaques do mês</h3></div>
+            {dailyPerf.length === 0 ? (
+              <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
+            ) : (
+              <div className="tf-cal-facts">
+                <div><span>Melhor dia</span><b className="tf-mono text-lime">dia {bestDay.day} · {fmtBRL(bestDay.pnl)}</b></div>
+                <div><span>Pior dia</span><b className={`tf-mono ${worstDay.pnl < 0 ? "text-coral" : ""}`}>dia {worstDay.day} · {fmtBRL(worstDay.pnl)}</b></div>
+                <div><span>Sequência atual</span><b className={`tf-mono ${streakSign > 0 ? "text-lime" : streakSign < 0 ? "text-coral" : ""}`}>{streak ? `${streak} ${streak === 1 ? "dia" : "dias"} no ${streakSign > 0 ? "verde" : "vermelho"}${streakSign > 0 && streak >= 3 ? " 🔥" : ""}` : "—"}</b></div>
+                <div><span>Dias no verde / vermelho</span><b className="tf-mono">{greenDays} / {redDays}</b></div>
+                <div><span>Vs. mês anterior</span>
+                  <b className={`tf-mono ${vsPrev === null ? "" : vsPrev >= 0 ? "text-lime" : "text-coral"}`}>
+                    {vsPrev === null ? "sem dados" : `${vsPrev >= 0 ? "▲ +" : "▼ "}${vsPrev}%`}{winDiff !== null && winDiff !== 0 ? ` · acerto ${winDiff > 0 ? "+" : ""}${winDiff} pts` : ""}
+                  </b>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
         <div className="tf-card">
           <div className="tf-card-head"><h3>Desempenho diário</h3></div>
           {dailyPerf.length === 0 ? (
             <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
           ) : (
-            <div className="tf-weekday-list">
+            <div className="tf-weekday-list tf-cal-daily-list">
               {dailyPerf.map((d) => (
                 <div className="tf-weekday-row" key={d.day}>
                   <span className="tf-weekday-label">Dia {String(d.day).padStart(2, "0")}</span>
@@ -1698,17 +1919,6 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
           )}
         </div>
       </div>
-
-      {selectedDay && !addingForDay && (
-        <DayDetailModal
-          dayTrades={selectedDayTrades}
-          dateLabel={`${String(selectedDay).padStart(2, "0")} de ${MONTH_LABELS[month]}`}
-          onClose={() => setSelectedDay(null)}
-          onAddTrade={() => setAddingForDay(selectedDay)}
-          onEditTrade={(trade) => { setSelectedDay(null); onEditTrade(trade); }}
-          onDeleteTrade={onDeleteTrade}
-        />
-      )}
 
       {addingForDay && (
         <NewTradeModal
@@ -4641,6 +4851,16 @@ function AppInner() {
     await loadUserData();
   };
 
+  const handleSaveMonthlyGoal = async (goal) => {
+    const { error } = await supabase.from("profiles").update({ monthly_goal: goal }).eq("id", session.user.id);
+    if (error) {
+      const missing = /monthly_goal|column/i.test(error.message || "");
+      return reportError(error, missing ? "salvar a meta do mês (rode o SQL novo no Supabase: tradefy_meta_mensal.sql)" : "salvar a meta do mês");
+    }
+    notify(goal ? "Meta do mês salva." : "Meta do mês removida.", "info");
+    await loadUserData();
+  };
+
   const handleUpdateCurrency = async (currency) => {
     const { error } = await supabase.from("profiles").update({ currency }).eq("id", session.user.id);
     if (error) return reportError(error, "salvar a moeda de exibição");
@@ -4685,7 +4905,7 @@ function AppInner() {
   const view = (() => {
     switch (active) {
       case "dashboard": return <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
-      case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
+      case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} dailyGoal={profile?.daily_goal} dailyStop={profile?.daily_stop} monthlyGoal={profile?.monthly_goal} onSaveMonthlyGoal={handleSaveMonthlyGoal} />;
       case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "mentors": return <MentoresView session={session} isMentorBetaTester={isMentorBetaTester} />;
@@ -6781,6 +7001,43 @@ const APP_STYLES = `
 .tf-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
 
 .tf-cal-stats-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px;}
+.tf-cal-mini-row{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px;}
+.tf-cal-mini{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 14px;min-width:0;}
+.tf-cal-mini small{display:block;color:var(--muted);font-size:11px;margin-bottom:3px;}
+.tf-cal-mini b{font-size:16px;white-space:nowrap;}
+.tf-cal-layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start;}
+.tf-cal-side{display:flex;flex-direction:column;gap:16px;min-width:0;}
+.tf-cal-main{display:flex;flex-direction:column;gap:16px;min-width:0;}
+.tf-cal-card-head{flex-wrap:wrap;gap:8px 14px;}
+.tf-cal-side .tf-asset{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tf-cal-side .tf-trade-row{flex-wrap:nowrap;gap:8px;}
+.tf-weekday-list.tf-cal-daily-list{display:block;column-count:2;column-gap:36px;}
+.tf-cal-daily-list .tf-weekday-row{break-inside:avoid;margin-bottom:6px;}
+.tf-cal-mode{display:flex;align-items:center;gap:8px;}
+.tf-cal-mode-label{font-size:11.5px;}
+.tf-cal-mode .tf-toggle-group button{padding:6px 11px;font-size:12px;white-space:nowrap;}
+.tf-cal-flag{position:absolute;top:3px;right:5px;font-size:11px;line-height:1;}
+.tf-cal-mood{position:absolute;bottom:6px;right:7px;width:7px;height:7px;border-radius:50%;}
+.tf-cal-week{border:1px dashed var(--border);border-radius:8px;height:64px;padding:6px 9px;display:flex;flex-direction:column;justify-content:space-between;background:var(--surface);min-width:0;}
+.tf-cal-week small{font-size:10px;color:var(--muted);}
+.tf-cal-week b{font-size:12.5px;white-space:nowrap;}
+.tf-cal-week i{font-style:normal;font-size:10px;color:var(--muted);white-space:nowrap;}
+.tf-cal-week.wk-up{border-color:rgba(34,197,94,0.45);} .tf-cal-week.wk-down{border-color:rgba(255,92,114,0.45);}
+.tf-cal-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;font-size:11px;color:var(--muted);}
+.tf-cal-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:2px;}
+.tf-cal-day-badges{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;}
+.tf-cal-badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:12px;}
+.tf-cal-badge.ok{background:rgba(34,197,94,0.15);color:var(--lime);} .tf-cal-badge.bad{background:rgba(255,92,114,0.15);color:var(--coral);}
+.tf-cal-goal-top{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;}
+.tf-cal-goal-top b{font-size:22px;}
+.tf-cal-goal-bar{height:9px;background:var(--surface-2);border-radius:6px;overflow:hidden;margin:8px 0 8px;}
+.tf-cal-goal-bar div{height:100%;background:linear-gradient(90deg,#16A34A,#22C55E);border-radius:6px;}
+.tf-cal-goal-edit{display:flex;gap:8px;flex-wrap:wrap;}
+.tf-cal-goal-edit input{flex:1;min-width:110px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;}
+.tf-cal-facts > div{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+.tf-cal-facts > div:last-child{border-bottom:0;}
+.tf-cal-facts span{color:var(--muted);} .tf-cal-facts b{text-align:right;}
+@media (max-width:1180px){ .tf-cal-layout{grid-template-columns:1fr;} .tf-weekday-list.tf-cal-daily-list{column-count:1;} .tf-cal-mini-row{grid-template-columns:repeat(3,1fr);} }
 .tf-stat{display:flex;flex-direction:column;gap:6px;} .tf-stat-top{display:flex;align-items:center;justify-content:space-between;}
 .tf-stat-label{font-size:12px;color:var(--muted);font-weight:500;}
 .tf-icon-badge{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;}
@@ -7122,10 +7379,11 @@ const APP_STYLES = `
 .tf-logout-btn{display:inline-flex;align-items:center;gap:7px;color:var(--coral);}
 .tf-month-nav{display:flex;align-items:center;gap:10px;}
 .tf-month-label{font-family:'Exo 2',sans-serif;font-weight:600;font-size:14px;}
-.tf-cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;}
-.tf-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
-.tf-cal-cell{aspect-ratio:1;border-radius:8px;background:var(--surface-2);padding:6px 7px;display:flex;flex-direction:column;justify-content:space-between;border:1px solid transparent;font-family:'Inter',sans-serif;text-align:left;width:100%;cursor:default;}
+.tf-cal-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) 116px;gap:5px;text-align:center;font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;}
+.tf-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) 116px;gap:5px;}
+.tf-cal-cell{position:relative;height:64px;border-radius:8px;background:var(--surface-2);padding:6px 7px;display:flex;flex-direction:column;justify-content:space-between;border:1px solid transparent;font-family:'Inter',sans-serif;text-align:left;width:100%;cursor:default;}
 .tf-cal-cell.has-day{border-color:var(--border);cursor:pointer;} .tf-cal-cell.has-day:hover{border-color:var(--blue);}
+.tf-cal-cell.selected{border-color:var(--blue);box-shadow:0 0 0 2px rgba(37,99,235,0.35);}
 .tf-cal-day{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;}
 .tf-cal-pnl{font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;}
 .tone-lime-1{background:rgba(31,163,92,0.10);} .tone-lime-1 .tf-cal-pnl{color:#7BD79E;}
@@ -7269,8 +7527,18 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-modal{ border-radius:16px 16px 0 0; }
 
   /* Calendar stays 7 columns but tighter */
-  .tf-cal-grid{ gap:4px; }
-  .tf-cal-cell{ padding:4px 5px; border-radius:6px; }
+  .tf-cal-grid, .tf-cal-weekdays{ gap:3px; grid-template-columns:repeat(7,minmax(0,1fr)) 64px; }
+  .tf-cal-cell{ padding:3px 4px; border-radius:6px; height:50px; }
+  .tf-cal-week{ height:50px; padding:4px 5px; border-radius:6px; }
+  .tf-cal-week small, .tf-cal-week i{ display:none; }
+  .tf-cal-week b{ font-size:9px; }
+  .tf-cal-flag{ font-size:8px; top:2px; right:3px; }
+  .tf-cal-mini-row{ grid-template-columns:repeat(2,1fr); }
+  .tf-cal-mode{ flex-wrap:wrap; }
+  .tf-cal-mode-label{ display:none; }
+  .tf-cal-mood{ display:none; }
+  .tf-cal-mode .tf-toggle-group button{ padding:6px 9px; font-size:11px; }
+  .tf-cal-side .tf-trade-side{ display:none; }
   .tf-cal-day{ font-size:9.5px; }
   .tf-cal-pnl{ font-size:8.5px; }
   .tf-cal-weekdays{ font-size:9.5px; }
