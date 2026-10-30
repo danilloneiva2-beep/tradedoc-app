@@ -1549,8 +1549,6 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade
 const WEEKDAY_LABELS = ["dom","seg","ter","qua","qui","sex","sáb"];
 const MONTH_LABELS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 
-const MOOD_COLORS = { Calmo: "#22C55E", Confiante: "#3B82F6", Ansioso: "#F59E0B", Ganancioso: "#A855F7", Frustrado: "#FF5C72" };
-
 function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade, dailyGoal, dailyStop, monthlyGoal, onSaveMonthlyGoal }) {
   const [monthDate, setMonthDate] = useState(new Date());
   const [pickedDay, setPickedDay] = useState(null);
@@ -1661,12 +1659,12 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
   const weeks = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
-  const intensity = (v) => {
-    if (v === undefined) return "empty";
-    const abs = Math.abs(v);
-    if (abs > 450) return v > 0 ? "lime-3" : "coral-3";
-    if (abs > 200) return v > 0 ? "lime-2" : "coral-2";
-    return v > 0 ? "lime-1" : "coral-1";
+  // Fundo suave e proporcional: quanto maior o resultado do dia (em relação ao maior do mês), mais forte o tom
+  const maxAbsDay = Math.max(1, ...Object.values(dayStats).map((x) => Math.abs(x.pnl)));
+  const tint = (v) => {
+    if (v === undefined || v === 0) return undefined;
+    const a = (0.05 + 0.17 * Math.pow(Math.abs(v) / maxAbsDay, 0.6)).toFixed(3);
+    return { background: v > 0 ? `rgba(95,203,147,${a})` : `rgba(238,127,144,${a})` };
   };
 
   const dayKey = (d) => `${monthPrefix}-${String(d).padStart(2, "0")}`;
@@ -1679,7 +1677,9 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
   const hasStop = Number(dailyStop) > 0;
   const selectedWeekday = selectedDay ? ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"][new Date(year, month, selectedDay).getDay()] : "";
   const cellText = (s) => (mode === "ops" ? `${s.n} op.` : mode === "win" ? `${Math.round((s.wins / s.n) * 100)}%` : fmtBRL(s.pnl));
-  const moodsUsed = [...new Set(Object.values(dayStats).map((s) => s.mood).filter(Boolean))];
+  const goalDays = hasGoal ? Object.values(dayStats).filter((x) => x.pnl >= Number(dailyGoal)).length : 0;
+  const stopDays = hasStop ? Object.values(dayStats).filter((x) => x.pnl <= -Number(dailyStop)).length : 0;
+  const selectedMood = selectedDay && dayStats[selectedDay] ? dayStats[selectedDay].mood : null;
 
   return (
     <div className="tf-view">
@@ -1696,19 +1696,19 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
       </div>
 
       <div className="tf-cal-mini-row">
-        <div className="tf-cal-mini"><small>Resultado do mês</small><b className={`tf-mono ${monthTotal >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(monthTotal)}</b></div>
-        <div className="tf-cal-mini"><small>Taxa de acerto</small><b className="tf-mono">{monthWinRate}%</b></div>
-        <div className="tf-cal-mini"><small>Operações</small><b className="tf-mono">{monthTrades.length}</b></div>
-        <div className="tf-cal-mini"><small>RR (ratio)</small><b className="tf-mono">{monthRR}</b></div>
-        <div className="tf-cal-mini"><small>Lucro bruto</small><b className="tf-mono text-lime">{fmtBRL(grossWin)}</b></div>
-        <div className="tf-cal-mini"><small>Prejuízo bruto</small><b className="tf-mono text-coral">{fmtBRL(-grossLoss)}</b></div>
+        <div className="tf-cal-mini"><small>Resultado do mês</small><b className={`tf-num ${monthTotal >= 0 ? "cal-up" : "cal-down"}`}>{fmtBRL(monthTotal)}</b></div>
+        <div className="tf-cal-mini"><small>Taxa de acerto</small><b className="tf-num">{monthWinRate}%</b></div>
+        <div className="tf-cal-mini"><small>Operações</small><b className="tf-num">{monthTrades.length}</b></div>
+        <div className="tf-cal-mini"><small>RR (ratio)</small><b className="tf-num">{monthRR}</b></div>
+        <div className="tf-cal-mini"><small>Lucro bruto</small><b className="tf-num">{fmtBRL(grossWin).replace(/^\+/, "")}</b></div>
+        <div className="tf-cal-mini"><small>Prejuízo bruto</small><b className="tf-num">{fmtBRL(grossLoss).replace(/^\+/, "")}</b></div>
       </div>
 
       <div className="tf-cal-layout">
         <div className="tf-cal-main">
         <div className="tf-card">
           <div className="tf-card-head tf-cal-card-head">
-            <h3>{MONTH_LABELS[month]} <span className={`tf-mono ${monthTotal >= 0 ? "text-lime" : "text-coral"}`} style={{ marginLeft: 10 }}>{fmtBRL(monthTotal)}</span></h3>
+            <h3>{MONTH_LABELS[month]} <span className={`tf-num ${monthTotal >= 0 ? "cal-up" : "cal-down"}`} style={{ marginLeft: 10 }}>{fmtBRL(monthTotal)}</span></h3>
             <div className="tf-cal-mode">
               <span className="tf-muted tf-cal-mode-label">Mostrar:</span>
               <div className="tf-toggle-group">
@@ -1731,30 +1731,27 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
                 <React.Fragment key={wi}>
                   {week.map((d, i) => {
                     const s = d ? dayStats[d] : null;
-                    const goalHit = s && hasGoal && s.pnl >= Number(dailyGoal);
-                    const stopHit = s && hasStop && s.pnl <= -Number(dailyStop);
                     return (
                       <button
                         key={i}
                         type="button"
                         disabled={!d}
                         onClick={() => d && (setPickedDay(d), setExpandedId(null))}
-                        className={`tf-cal-cell ${d ? "has-day" : ""} ${d && d === selectedDay ? "selected" : ""} tone-${intensity(s ? s.pnl : undefined)}`}
+                        style={s ? tint(s.pnl) : undefined}
+                        className={`tf-cal-cell ${d ? "has-day" : ""} ${d && d === selectedDay ? "selected" : ""}`}
                       >
                         {d && (
                           <>
                             <span className="tf-cal-day">{d}</span>
-                            {s && <span className="tf-cal-pnl">{cellText(s)}</span>}
-                            {(goalHit || stopHit) && <span className={`tf-cal-flag ${goalHit ? "flag-goal" : "flag-stop"}`} title={goalHit ? "Bateu a meta do dia" : "Estourou o stop do dia"}>{goalHit ? "Meta" : "Stop"}</span>}
-                            {s && s.mood && <span className="tf-cal-mood" title={`Humor: ${s.mood}`} style={{ background: MOOD_COLORS[s.mood] || "var(--muted)" }} />}
+                            {s && <span className={`tf-cal-pnl ${mode === "pnl" ? (s.pnl > 0 ? "cal-up" : s.pnl < 0 ? "cal-down" : "") : ""}`}>{cellText(s)}</span>}
                           </>
                         )}
                       </button>
                     );
                   })}
-                  <div className={`tf-cal-week ${days.length ? (wTotal >= 0 ? "wk-up" : "wk-down") : ""}`}>
+                  <div className="tf-cal-week">
                     <small>Semana {wi + 1}</small>
-                    <b className={`tf-mono ${days.length ? (wTotal >= 0 ? "text-lime" : "text-coral") : "tf-muted"}`}>{days.length ? fmtBRL(wTotal) : "—"}</b>
+                    <b className={`tf-num ${days.length ? (wTotal >= 0 ? "cal-up" : "cal-down") : "tf-muted"}`}>{days.length ? fmtBRL(wTotal) : "—"}</b>
                     <i>{days.length ? `${days.length} ${days.length === 1 ? "dia" : "dias"} · ${wOps} op.` : "sem trades"}</i>
                   </div>
                 </React.Fragment>
@@ -1762,9 +1759,9 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
             })}
           </div>
           <div className="tf-cal-legend">
-            {hasGoal && <span><em className="tf-cal-flag flag-goal tf-cal-flag-static">Meta</em> bateu a meta do dia</span>}
-            {hasStop && <span><em className="tf-cal-flag flag-stop tf-cal-flag-static">Stop</em> estourou o limite de perda</span>}
-            {moodsUsed.map((m) => <span key={m}><i style={{ background: MOOD_COLORS[m] || "var(--muted)" }} /> {m.toLowerCase()}</span>)}
+            <span><i className="lg-up" /> dia positivo</span>
+            <span><i className="lg-down" /> dia negativo</span>
+            <span>quanto mais forte o tom, maior o resultado do dia</span>
           </div>
         </div>
 
@@ -1777,7 +1774,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
               <AreaChart data={monthEquityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="calEqFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#22C55E" stopOpacity={0.35} />
+                    <stop offset="0%" stopColor="#5FCB93" stopOpacity={0.28} />
                     <stop offset="100%" stopColor="#2563EB" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
@@ -1785,7 +1782,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
                 <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} domain={["auto", "auto"]} />
                 <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Resultado acumulado"]} />
-                <Area type="monotone" dataKey="eq" stroke="#22C55E" strokeWidth={2.5} fill="url(#calEqFill)" />
+                <Area type="monotone" dataKey="eq" stroke="#5FCB93" strokeWidth={2.2} fill="url(#calEqFill)" />
               </AreaChart>
             </ResponsiveContainer>
           )}
@@ -1798,7 +1795,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
               <>
                 <div className="tf-card-head">
                   <h3>Dia {selectedDay} · {selectedWeekday}</h3>
-                  <span className={`tf-mono ${selectedTotal >= 0 ? "text-lime" : "text-coral"}`} style={{ fontWeight: 700 }}>{selectedDayTrades.length ? fmtBRL(selectedTotal) : ""}</span>
+                  <span className={`tf-num ${selectedTotal >= 0 ? "cal-up" : "cal-down"}`} style={{ fontWeight: 700 }}>{selectedDayTrades.length ? fmtBRL(selectedTotal) : ""}</span>
                 </div>
                 {selectedDayTrades.length > 0 ? (
                   <>
@@ -1817,7 +1814,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
                               <span className="tf-asset">{t.trade_time ? `${t.trade_time} · ` : ""}{t.asset}</span>
                               <span className="tf-muted tf-trade-side">{t.side}</span>
                               {hasExtra && <FileSpreadsheet size={12} className="tf-muted" style={{ flexShrink: 0 }} />}
-                              <span className={`tf-mono tf-trade-pnl ${t.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Number(t.pnl))}</span>
+                              <span className={`tf-num tf-trade-pnl ${t.pnl >= 0 ? "cal-up" : "cal-down"}`}>{fmtBRL(Number(t.pnl))}</span>
                               <button type="button" className="tf-row-action" onClick={(e) => { e.stopPropagation(); onEditTrade(t); }} title="Editar"><Pencil size={13} /></button>
                               <button type="button" className="tf-row-action tf-row-action-danger" onClick={(e) => { e.stopPropagation(); onDeleteTrade(t); }} title="Apagar"><Trash2 size={13} /></button>
                             </div>
@@ -1826,10 +1823,11 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
                         );
                       })}
                     </div>
-                    <div className="tf-cal-day-badges">
-                      {hasGoal && selectedTotal >= Number(dailyGoal) && <span className="tf-cal-badge ok">Meta do dia batida</span>}
-                      {hasStop && selectedTotal <= -Number(dailyStop) && <span className="tf-cal-badge bad">Stop do dia atingido</span>}
-                      <span className="tf-muted" style={{ fontSize: 12 }}>{selectedDayTrades.length} {selectedDayTrades.length === 1 ? "operação" : "operações"} · {Math.round((selectedWins / selectedDayTrades.length) * 100)}% de acerto</span>
+                    <div className="tf-cal-day-notes">
+                      <span>{selectedDayTrades.length} {selectedDayTrades.length === 1 ? "operação" : "operações"} · {Math.round((selectedWins / selectedDayTrades.length) * 100)}% de acerto</span>
+                      {hasGoal && selectedTotal >= Number(dailyGoal) && <span>Meta do dia batida</span>}
+                      {hasStop && selectedTotal <= -Number(dailyStop) && <span>Stop do dia atingido</span>}
+                      {selectedMood && <span>Humor predominante: {selectedMood}</span>}
                     </div>
                   </>
                 ) : (
@@ -1863,12 +1861,12 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
             ) : goalValue ? (
               <>
                 <div className="tf-cal-goal-top">
-                  <b className="tf-mono">{Math.round(goalPct)}%</b>
+                  <b className="tf-num">{Math.round(goalPct)}%</b>
                   <span className="tf-muted">{monthTotal >= goalValue ? "Meta atingida" : `faltam ${fmtBRL(goalValue - monthTotal).replace("+", "")}`}</span>
                 </div>
                 <div className="tf-cal-goal-bar"><div style={{ width: `${goalPct}%` }} /></div>
                 {projection !== null ? (
-                  <p className="tf-muted" style={{ fontSize: 12, margin: 0 }}>Projeção no ritmo atual: <b className={`tf-mono ${projection >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(Math.round(projection))}</b> no fim do mês</p>
+                  <p className="tf-muted" style={{ fontSize: 12, margin: 0 }}>Projeção no ritmo atual: <b className={`tf-num ${projection >= 0 ? "cal-up" : "cal-down"}`}>{fmtBRL(Math.round(projection))}</b> no fim do mês</p>
                 ) : (
                   <p className="tf-muted" style={{ fontSize: 12, margin: 0 }}>{isCurrentMonth ? "Registre trades para ver a projeção." : "Mês encerrado."}</p>
                 )}
@@ -1884,12 +1882,14 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
               <p className="tf-empty">Nenhum trade registrado neste mês ainda.</p>
             ) : (
               <div className="tf-cal-facts">
-                <div><span>Melhor dia</span><b className="tf-mono text-lime">dia {bestDay.day} · {fmtBRL(bestDay.pnl)}</b></div>
-                <div><span>Pior dia</span><b className={`tf-mono ${worstDay.pnl < 0 ? "text-coral" : ""}`}>dia {worstDay.day} · {fmtBRL(worstDay.pnl)}</b></div>
-                <div><span>Sequência atual</span><b className={`tf-mono ${streakSign > 0 ? "text-lime" : streakSign < 0 ? "text-coral" : ""}`}>{streak ? `${streak} ${streak === 1 ? "dia" : "dias"} no ${streakSign > 0 ? "verde" : "vermelho"}` : "—"}</b></div>
-                <div><span>Dias no verde / vermelho</span><b className="tf-mono">{greenDays} / {redDays}</b></div>
+                <div><span>Melhor dia</span><b className="tf-num cal-up">dia {bestDay.day} · {fmtBRL(bestDay.pnl)}</b></div>
+                <div><span>Pior dia</span><b className={`tf-num ${worstDay.pnl < 0 ? "cal-down" : ""}`}>dia {worstDay.day} · {fmtBRL(worstDay.pnl)}</b></div>
+                <div><span>Sequência atual</span><b className={`tf-num ${streakSign > 0 ? "cal-up" : streakSign < 0 ? "cal-down" : ""}`}>{streak ? `${streak} ${streak === 1 ? "dia" : "dias"} no ${streakSign > 0 ? "verde" : "vermelho"}` : "—"}</b></div>
+                <div><span>Dias no verde / vermelho</span><b className="tf-num">{greenDays} / {redDays}</b></div>
+                {hasGoal && <div><span>Meta do dia batida</span><b className="tf-num">{goalDays} {goalDays === 1 ? "dia" : "dias"}</b></div>}
+                {hasStop && <div><span>Stop do dia atingido</span><b className="tf-num">{stopDays} {stopDays === 1 ? "dia" : "dias"}</b></div>}
                 <div><span>Vs. mês anterior</span>
-                  <b className={`tf-mono ${vsPrev === null ? "" : vsPrev >= 0 ? "text-lime" : "text-coral"}`}>
+                  <b className={`tf-num ${vsPrev === null ? "" : vsPrev >= 0 ? "cal-up" : "cal-down"}`}>
                     {vsPrev === null ? "sem dados" : `${vsPrev >= 0 ? "+" : ""}${vsPrev}%`}{winDiff !== null && winDiff !== 0 ? ` · acerto ${winDiff > 0 ? "+" : ""}${winDiff} pts` : ""}
                   </b>
                 </div>
@@ -1912,7 +1912,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
                   <div className="tf-weekday-bar-track">
                     <div className={`tf-weekday-bar-fill ${d.pnl >= 0 ? "fill-lime" : "fill-coral"}`} style={{ width: `${Math.max(2, (Math.abs(d.pnl) / maxAbsDaily) * 100)}%` }} />
                   </div>
-                  <span className={`tf-mono tf-weekday-value ${d.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(d.pnl)}</span>
+                  <span className={`tf-num tf-weekday-value ${d.pnl >= 0 ? "cal-up" : "cal-down"}`}>{fmtBRL(d.pnl)}</span>
                 </div>
               ))}
             </div>
@@ -7016,25 +7016,25 @@ const APP_STYLES = `
 .tf-cal-mode{display:flex;align-items:center;gap:8px;}
 .tf-cal-mode-label{font-size:11.5px;}
 .tf-cal-mode .tf-toggle-group button{padding:6px 11px;font-size:12px;white-space:nowrap;}
-.tf-cal-flag{position:absolute;top:5px;right:5px;font-size:8.5px;line-height:1;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 5px;border-radius:4px;font-style:normal;}
-.tf-cal-flag.flag-goal{background:rgba(34,197,94,0.16);color:var(--lime);}
-.tf-cal-flag.flag-stop{background:rgba(255,92,114,0.16);color:var(--coral);}
-.tf-cal-flag.tf-cal-flag-static{position:static;display:inline-block;margin-right:6px;vertical-align:1px;}
-.tf-cal-mood{position:absolute;bottom:7px;right:7px;width:6px;height:6px;border-radius:50%;opacity:.9;}
-.tf-cal-week{border:1px dashed var(--border);border-radius:8px;height:64px;padding:6px 9px;display:flex;flex-direction:column;justify-content:space-between;background:var(--surface);min-width:0;}
+.tf-cal-week{border:1px solid var(--border);border-radius:8px;height:64px;padding:7px 10px;display:flex;flex-direction:column;justify-content:space-between;background:transparent;min-width:0;}
 .tf-cal-week small{font-size:10px;color:var(--muted);}
 .tf-cal-week b{font-size:12.5px;white-space:nowrap;}
 .tf-cal-week i{font-style:normal;font-size:10px;color:var(--muted);white-space:nowrap;}
-.tf-cal-week.wk-up{border-color:rgba(34,197,94,0.45);} .tf-cal-week.wk-down{border-color:rgba(255,92,114,0.45);}
 .tf-cal-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px;font-size:11px;color:var(--muted);}
-.tf-cal-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:2px;}
-.tf-cal-day-badges{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;}
-.tf-cal-badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:12px;}
-.tf-cal-badge.ok{background:rgba(34,197,94,0.15);color:var(--lime);} .tf-cal-badge.bad{background:rgba(255,92,114,0.15);color:var(--coral);}
+.tf-cal-legend i{display:inline-block;width:18px;height:8px;border-radius:3px;margin-right:6px;vertical-align:middle;}
+.tf-cal-legend .lg-up{background:rgba(95,203,147,0.35);} .tf-cal-legend .lg-down{background:rgba(238,127,144,0.35);}
+.tf-num{font-family:'Inter',sans-serif;font-variant-numeric:tabular-nums;letter-spacing:-0.01em;}
+.cal-up{color:#5FCB93;} .cal-down{color:#EE7F90;}
+.tf-app.theme-light .cal-up{color:#1B8F50;} .tf-app.theme-light .cal-down{color:#C23B4E;}
+.tf-cal-cell .tf-cal-pnl{font-family:'Inter',sans-serif;font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:-0.01em;}
+.tf-cal-cell .tf-cal-day{font-family:'Inter',sans-serif;}
+.tf-cal-day-notes{display:flex;flex-direction:column;gap:3px;margin-bottom:12px;font-size:12px;color:var(--muted);}
+.tf-cal-goal-bar div{background:#5FCB93;opacity:.85;}
+.tf-cal-daily-list .fill-lime{background:#5FCB93;opacity:.85;} .tf-cal-daily-list .fill-coral{background:#EE7F90;opacity:.85;}
 .tf-cal-goal-top{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;}
 .tf-cal-goal-top b{font-size:22px;}
-.tf-cal-goal-bar{height:9px;background:var(--surface-2);border-radius:6px;overflow:hidden;margin:8px 0 8px;}
-.tf-cal-goal-bar div{height:100%;background:linear-gradient(90deg,#16A34A,#22C55E);border-radius:6px;}
+.tf-cal-goal-bar{height:6px;background:var(--surface-2);border-radius:6px;overflow:hidden;margin:8px 0 8px;}
+.tf-cal-goal-bar div{height:100%;border-radius:6px;}
 .tf-cal-goal-edit{display:flex;gap:8px;flex-wrap:wrap;}
 .tf-cal-goal-edit input{flex:1;min-width:110px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:14px;}
 .tf-cal-facts > div{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
@@ -7535,13 +7535,9 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-cal-week{ height:50px; padding:4px 5px; border-radius:6px; }
   .tf-cal-week small, .tf-cal-week i{ display:none; }
   .tf-cal-week b{ font-size:9px; }
-  .tf-cal-flag:not(.tf-cal-flag-static){ font-size:0; padding:0; width:6px; height:6px; border-radius:50%; top:4px; right:4px; }
-  .tf-cal-flag.flag-goal:not(.tf-cal-flag-static){ background:var(--lime); }
-  .tf-cal-flag.flag-stop:not(.tf-cal-flag-static){ background:var(--coral); }
   .tf-cal-mini-row{ grid-template-columns:repeat(2,1fr); }
   .tf-cal-mode{ flex-wrap:wrap; }
   .tf-cal-mode-label{ display:none; }
-  .tf-cal-mood{ display:none; }
   .tf-cal-mode .tf-toggle-group button{ padding:6px 9px; font-size:11px; }
   .tf-cal-side .tf-trade-side{ display:none; }
   .tf-cal-day{ font-size:9.5px; }
