@@ -514,6 +514,16 @@ function mt5DateToISO(raw) {
   return datePart.replace(/\./g, "-");
 }
 
+// Extrai "HH:MM" da data/hora de abertura do relatório (texto ou data nativa do Excel)
+function timeFromRaw(raw) {
+  if (raw instanceof Date) {
+    const d = new Date(raw.getTime() + 500); // evita cair no minuto anterior por arredondamento do Excel
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  const m = /(\d{1,2}):(\d{2})/.exec(String(raw ?? ""));
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : null;
+}
+
 function profitProDateToISO(raw) {
   // "08/07/2026 09:01:23" -> "2026-07-08"
   const datePart = String(raw).trim().split(" ")[0];
@@ -563,6 +573,7 @@ function parseMT5Report(rows) {
       side: tipo === "buy" ? "Compra" : "Venda",
       pnl: Math.round(pnl * 100) / 100,
       trade_date: mt5DateToISO(row[idxOpenTime]),
+      ...(timeFromRaw(row[idxOpenTime]) ? { trade_time: timeFromRaw(row[idxOpenTime]) } : {}),
     });
   }
   return results;
@@ -624,6 +635,7 @@ function parseProfitProReport(text) {
       side: lado.startsWith("C") ? "Compra" : lado.startsWith("V") ? "Venda" : "Compra",
       pnl: Math.round(brNumberToFloat(resOperacao) * 100) / 100,
       trade_date: isoDate,
+      ...(timeFromRaw(abertura) ? { trade_time: timeFromRaw(abertura) } : {}),
     });
   }
   return results;
@@ -757,7 +769,7 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
                     <tbody>
                       {rows.slice(0, 50).map((r, i) => (
                         <tr key={i}>
-                          <td>{r.trade_date}</td>
+                          <td>{r.trade_date}{r.trade_time ? ` ${r.trade_time}` : ""}</td>
                           <td>{r.asset}</td>
                           <td>{r.side}</td>
                           <td className={r.pnl >= 0 ? "text-lime" : "text-coral"}>{fmtBRL(r.pnl)}</td>
@@ -1292,6 +1304,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
             <p className="tf-empty">Preencha o horário da entrada nos seus trades (em "Mais detalhes") para ver em quais horas você ganha e perde.</p>
           ) : (
             <div className="tf-table">
+              <p className="tf-muted" style={{ fontSize: 11.5, margin: "0 0 8px" }}>Horários conforme o relatório. No MetaTrader é o horário do servidor da corretora.</p>
               <div className="tf-table-row tf-table-head"><span>Hora</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
               {data.hourPerf.map((h) => (
                 <div className="tf-table-row" key={h.hour}>
@@ -1305,8 +1318,6 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
           )}
         </div>
       </div>
-
-      <AdvancedMetricsCard data={data} />
 
       {data.setupPerf.length > 0 && (
         <div className="tf-card" style={{ marginBottom: 16 }}>
@@ -1393,6 +1404,8 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
           <button type="button" className="tf-btn-primary" onClick={onShareWithMentor}><Share2 size={15} /> Compartilhar com seu mentor</button>
         </div>
       )}
+
+      <AdvancedMetricsCard data={data} />
     </div>
   );
 }
@@ -4456,7 +4469,11 @@ function AppInner() {
     const insertedIds = [];
     for (let i = 0; i < rowsToInsert.length; i += 300) {
       const chunk = rowsToInsert.slice(i, i + 300);
-      const { data: ins, error: insertError } = await supabase.from("trades").insert(chunk).select("id");
+      let { data: ins, error: insertError } = await supabase.from("trades").insert(chunk).select("id");
+      if (insertError && /trade_time/i.test(insertError.message || "")) {
+        const withoutTime = chunk.map(({ trade_time, ...rest }) => rest);
+        ({ data: ins, error: insertError } = await supabase.from("trades").insert(withoutTime).select("id"));
+      }
       if (insertError) {
         // desfaz o que já tinha entrado, pra não deixar importação pela metade
         for (let k = 0; k < insertedIds.length; k += 100) {
