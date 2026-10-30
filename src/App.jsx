@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import * as THREE from "three";
-import Papa from "papaparse";
-import * as XLSX from "xlsx";
+// Bibliotecas pesadas (globo 3D e leitura de planilhas) só são baixadas quando
+// a pessoa realmente usa essas telas — o app abre bem mais rápido.
+let THREE = null;
+let Papa = null;
+let XLSX = null;
+async function loadImportLibs() {
+  if (Papa && XLSX) return;
+  const [papaMod, xlsxMod] = await Promise.all([import("papaparse"), import("xlsx")]);
+  Papa = papaMod.default || papaMod;
+  XLSX = xlsxMod;
+}
 import * as tus from "tus-js-client";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -21,6 +29,7 @@ import { supabase } from "./supabaseClient";
 ----------------------------------------------------------------*/
 
 let CURRENCY_MODE = "BRL";
+let KNOWN_SETUPS = [];
 let USD_BRL_RATE = 1;
 
 function fmtBRL(v) {
@@ -31,6 +40,45 @@ function fmtBRL(v) {
     return `${sign}US$ ${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
   return `${sign}R$ ${Math.abs(n).toLocaleString("pt-BR")}`;
+}
+
+/* ---------- Utilidades compartilhadas ---------- */
+
+// Data de HOJE no fuso do usuário (YYYY-MM-DD). Não usar toISOString() pra isso:
+// ele devolve a data em UTC e, no Brasil, depois das 21h já seria "amanhã".
+function localDateStr(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// O Supabase devolve no máximo 1.000 linhas por consulta. Essa função busca
+// em páginas até trazer tudo, pra ninguém perder trades na tela.
+async function fetchAllRows(buildQuery, pageSize = 1000) {
+  let all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) return { data: all, error };
+    const rows = data || [];
+    all = all.concat(rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return { data: all, error: null };
+}
+
+// Mensagens e confirmações do próprio app (no lugar das janelinhas do navegador)
+const uiBus = { toast: null, confirm: null };
+function notify(message, kind) {
+  const k = kind || (/n[ãa]o consegui|erro|falh|limite|inv[áa]lid|muito grande|permite|marque|precisa/i.test(String(message)) ? "error" : "info");
+  if (uiBus.toast) uiBus.toast(String(message), k);
+  else console.warn(message);
+}
+function askConfirm(message, opts = {}) {
+  if (uiBus.confirm) return uiBus.confirm(String(message), opts);
+  return Promise.resolve(window.confirm(String(message)));
 }
 
 const BASE_CAPITAL = 12000;
@@ -103,8 +151,264 @@ function useDerivedData(trades, accounts) {
       .sort((a, b) => parseLocalDate(b.trade_date) - parseLocalDate(a.trade_date))
       .slice(0, 6);
 
-    return { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity };
+    // ---- métricas avançadas ----
+    const avgWin = wins.length ? grossWin / wins.length : 0;
+    const avgLoss = losses.length ? grossLoss / losses.length : 0;
+    const payoff = avgLoss > 0 ? avgWin / avgLoss : null;
+    const expectancy = trades.length ? totalPnL / trades.length : 0;
+
+    let curW = 0, curL = 0, maxWinStreak = 0, maxLossStreak = 0;
+    sorted.forEach((t) => {
+      const v = Number(t.pnl);
+      if (v > 0) { curW += 1; curL = 0; } else if (v < 0) { curL += 1; curW = 0; } else { curW = 0; curL = 0; }
+      if (curW > maxWinStreak) maxWinStreak = curW;
+      if (curL > maxLossStreak) maxLossStreak = curL;
+    });
+
+    const dayMap = {};
+    trades.forEach((t) => { dayMap[t.trade_date] = (dayMap[t.trade_date] || 0) + Number(t.pnl); });
+    const dayEntries = Object.entries(dayMap);
+    const bestDay = dayEntries.length ? dayEntries.reduce((a, b) => (b[1] > a[1] ? b : a)) : null;
+    const worstDay = dayEntries.length ? dayEntries.reduce((a, b) => (b[1] < a[1] ? b : a)) : null;
+
+    const hourMap = {};
+    trades.forEach((t) => {
+      const m = /^(\d{1,2}):\d{2}/.exec(t.trade_time || "");
+      if (!m) return;
+      const h = String(Number(m[1])).padStart(2, "0");
+      if (!hourMap[h]) hourMap[h] = { hour: h, trades: 0, wins: 0, pnl: 0 };
+      hourMap[h].trades += 1;
+      if (Number(t.pnl) > 0) hourMap[h].wins += 1;
+      hourMap[h].pnl += Number(t.pnl);
+    });
+    const hourPerf = Object.values(hourMap).sort((a, b) => a.hour.localeCompare(b.hour));
+
+    const setupMap = {};
+    trades.forEach((t) => {
+      const name = (t.setup || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (!setupMap[key]) setupMap[key] = { setup: name, trades: 0, wins: 0, pnl: 0 };
+      setupMap[key].trades += 1;
+      if (Number(t.pnl) > 0) setupMap[key].wins += 1;
+      setupMap[key].pnl += Number(t.pnl);
+    });
+    const setupPerf = Object.values(setupMap)
+      .map((x) => ({ ...x, winRate: Math.round((x.wins / x.trades) * 100) }))
+      .sort((a, b) => b.pnl - a.pnl);
+
+    const withRisk = trades.filter((t) => Number(t.risk_amount) > 0);
+    const totalR = withRisk.reduce((sum, t) => sum + Number(t.pnl) / Number(t.risk_amount), 0);
+    const avgR = withRisk.length ? totalR / withRisk.length : null;
+    const totalFees = trades.reduce((sum, t) => sum + (Number(t.fees) || 0), 0);
+
+    return {
+      equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity,
+      avgWin, avgLoss, payoff, expectancy, maxWinStreak, maxLossStreak, bestDay, worstDay,
+      hourPerf, setupPerf, avgR, totalR, rCount: withRisk.length, totalFees, rawTrades: trades,
+    };
   }, [trades, accounts]);
+}
+
+/* ------------------- Resumos, exportação e relatório -------------------- */
+
+function summarizeTrades(list) {
+  const pnls = list.map((t) => Number(t.pnl));
+  const wins = pnls.filter((v) => v > 0);
+  const losses = pnls.filter((v) => v < 0);
+  const grossWin = wins.reduce((a, b) => a + b, 0);
+  const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
+  const avgWin = wins.length ? grossWin / wins.length : 0;
+  const avgLoss = losses.length ? grossLoss / losses.length : 0;
+  return {
+    count: list.length,
+    pnl: pnls.reduce((a, b) => a + b, 0),
+    wins: wins.length,
+    losses: losses.length,
+    winRate: list.length ? Math.round((wins.length / list.length) * 100) : 0,
+    profitFactor: grossLoss > 0 ? grossWin / grossLoss : null,
+    avgWin, avgLoss,
+    payoff: avgLoss > 0 ? avgWin / avgLoss : null,
+    expectancy: list.length ? pnls.reduce((a, b) => a + b, 0) / list.length : 0,
+  };
+}
+
+function fmtPlain(v) {
+  const n = Number(v) || 0;
+  return `${n < 0 ? "-" : ""}R$ ${Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Início (segunda) e fim (domingo) de uma semana, em datas locais. offset 0 = esta semana, 1 = passada.
+function weekRange(offsetWeeks = 0) {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7;
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow - 7 * offsetWeeks);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+  return [localDateStr(start), localDateStr(end)];
+}
+
+function buildWeeklySummary(trades) {
+  const [s0, e0] = weekRange(0);
+  const [s1, e1] = weekRange(1);
+  const inRange = (t, a, b) => t.trade_date >= a && t.trade_date <= b;
+  const thisWeek = trades.filter((t) => inRange(t, s0, e0));
+  const lastWeek = trades.filter((t) => inRange(t, s1, e1));
+  const cur = summarizeTrades(thisWeek);
+  const prev = summarizeTrades(lastWeek);
+
+  const insights = [];
+  if (thisWeek.length > 0) {
+    const byAsset = {};
+    thisWeek.forEach((t) => { byAsset[t.asset] = (byAsset[t.asset] || 0) + Number(t.pnl); });
+    const arr = Object.entries(byAsset).sort((a, b) => b[1] - a[1]);
+    if (arr[0] && arr[0][1] > 0) insights.push(`Ativo que mais rendeu: ${arr[0][0]} (${fmtBRL(arr[0][1])}).`);
+    const last = arr[arr.length - 1];
+    if (last && last[1] < 0) insights.push(`Ativo que mais custou: ${last[0]} (${fmtBRL(last[1])}).`);
+  }
+  // padrões das últimas 2 semanas
+  const recent = [...thisWeek, ...lastWeek];
+  const lossMoods = {};
+  recent.filter((t) => Number(t.pnl) < 0 && t.mood).forEach((t) => { lossMoods[t.mood] = (lossMoods[t.mood] || 0) + 1; });
+  const topMood = Object.entries(lossMoods).sort((a, b) => b[1] - a[1])[0];
+  if (topMood && topMood[1] >= 2) insights.push(`Nas perdas recentes, você estava mais vezes "${topMood[0].toLowerCase()}" (${topMood[1]}x).`);
+  const setups = {};
+  recent.forEach((t) => {
+    const k = (t.setup || "").trim();
+    if (!k) return;
+    if (!setups[k]) setups[k] = { n: 0, pnl: 0 };
+    setups[k].n += 1; setups[k].pnl += Number(t.pnl);
+  });
+  const worstSetup = Object.entries(setups).filter(([, v]) => v.n >= 3).sort((a, b) => a[1].pnl - b[1].pnl)[0];
+  if (worstSetup && worstSetup[1].pnl < 0) insights.push(`O setup "${worstSetup[0]}" está negativo nas últimas 2 semanas (${fmtBRL(worstSetup[1].pnl)} em ${worstSetup[1].n} trades).`);
+
+  return { cur, prev, insights, range: [s0, e0] };
+}
+
+function downloadTextFile(filename, content, mime = "text/csv;charset=utf-8") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function exportTradesCsv(trades, accounts, filename) {
+  const accName = Object.fromEntries(accounts.map((a) => [a.id, a.name]));
+  const num = (v) => (v === null || v === undefined || v === "" ? "" : String(Number(v)).replace(".", ","));
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const header = ["Data", "Hora", "Conta", "Ativo", "Lado", "Resultado", "Risco planejado", "Múltiplo R", "Setup", "Tags", "Humor", "Custos", "Notas"];
+  const rows = [...trades].sort((a, b) => a.trade_date.localeCompare(b.trade_date)).map((t) => {
+    const r = Number(t.risk_amount) > 0 ? Number(t.pnl) / Number(t.risk_amount) : "";
+    return [
+      `${t.trade_date.slice(8, 10)}/${t.trade_date.slice(5, 7)}/${t.trade_date.slice(0, 4)}`,
+      t.trade_time || "", accName[t.account_id] || "", t.asset, t.side, num(t.pnl), num(t.risk_amount),
+      r === "" ? "" : r.toFixed(2).replace(".", ","), t.setup || "", t.tags || "", t.mood || "", num(t.fees), t.notes || "",
+    ].map(esc).join(";");
+  });
+  downloadTextFile(filename || "tradefy-trades.csv", "\uFEFF" + [header.map(esc).join(";"), ...rows].join("\r\n"));
+}
+
+function escHtml(v) {
+  return String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function buildReportHtml({ trades, periodLabel, userName, accountsLabel }) {
+  const sm = summarizeTrades(trades);
+  const sorted = [...trades].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+  const dayMap = {};
+  trades.forEach((t) => { dayMap[t.trade_date] = (dayMap[t.trade_date] || 0) + Number(t.pnl); });
+  const days = Object.entries(dayMap);
+  const best = days.length ? days.reduce((a, b) => (b[1] > a[1] ? b : a)) : null;
+  const worst = days.length ? days.reduce((a, b) => (b[1] < a[1] ? b : a)) : null;
+  const fmtD = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+  const byAsset = {};
+  trades.forEach((t) => {
+    if (!byAsset[t.asset]) byAsset[t.asset] = { n: 0, pnl: 0, w: 0 };
+    byAsset[t.asset].n += 1; byAsset[t.asset].pnl += Number(t.pnl); if (Number(t.pnl) > 0) byAsset[t.asset].w += 1;
+  });
+  const cls = (v) => (Number(v) >= 0 ? "pos" : "neg");
+  const card = (label, value, c) => `<div class="card"><div class="lb">${escHtml(label)}</div><div class="vl ${c || ""}">${escHtml(value)}</div></div>`;
+  const tradeRows = sorted.map((t) => `<tr><td>${fmtD(t.trade_date)}${t.trade_time ? " " + escHtml(t.trade_time) : ""}</td><td>${escHtml(t.asset)}</td><td>${escHtml(t.side)}</td><td>${escHtml(t.setup || "")}</td><td class="r ${cls(t.pnl)}">${escHtml(fmtPlain(t.pnl))}</td></tr>`).join("");
+  const assetRows = Object.entries(byAsset).sort((a, b) => b[1].pnl - a[1].pnl).map(([a, v]) => `<tr><td>${escHtml(a)}</td><td>${v.n}</td><td>${Math.round((v.w / v.n) * 100)}%</td><td class="r ${cls(v.pnl)}">${escHtml(fmtPlain(v.pnl))}</td></tr>`).join("");
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Tradefy — ${escHtml(periodLabel)}</title>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#111827;margin:28px;font-size:12px}
+h1{font-size:20px;margin:0 0 2px}h2{font-size:13px;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#374151}
+.sub{color:#6B7280;margin-bottom:16px}.brand{font-weight:700;font-size:13px;letter-spacing:.04em;margin-bottom:10px}.brand span{color:#16A34A}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.card{border:1px solid #E5E7EB;border-radius:6px;padding:10px 12px}
+.lb{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:.05em}.vl{font-size:16px;font-weight:700;margin-top:3px}
+.pos{color:#15803D}.neg{color:#B91C1C}table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid #E5E7EB;text-align:left}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6B7280;background:#F9FAFB}td.r,th.r{text-align:right}
+.foot{margin-top:22px;color:#9CA3AF;font-size:10px}@media print{body{margin:14mm}}
+</style></head><body>
+<div class="brand">TRADE<span>FY</span></div>
+<h1>Relatório de desempenho</h1>
+<div class="sub">${escHtml(periodLabel)} · ${escHtml(accountsLabel)}${userName ? " · " + escHtml(userName) : ""}</div>
+<div class="grid">
+${card("Resultado", fmtPlain(sm.pnl), cls(sm.pnl))}${card("Operações", String(sm.count))}${card("Taxa de acerto", sm.winRate + "%")}${card("Fator de lucro", sm.profitFactor === null ? "—" : sm.profitFactor.toFixed(2))}
+${card("Ganho médio", fmtPlain(sm.avgWin), "pos")}${card("Perda média", fmtPlain(-sm.avgLoss), "neg")}${card("Payoff", sm.payoff === null ? "—" : sm.payoff.toFixed(2))}${card("Expectativa por trade", fmtPlain(sm.expectancy), cls(sm.expectancy))}
+${card("Melhor dia", best ? fmtD(best[0]) + " · " + fmtPlain(best[1]) : "—", best ? cls(best[1]) : "")}${card("Pior dia", worst ? fmtD(worst[0]) + " · " + fmtPlain(worst[1]) : "—", worst ? cls(worst[1]) : "")}
+</div>
+<h2>Por ativo</h2>
+<table><thead><tr><th>Ativo</th><th>Trades</th><th>Acerto</th><th class="r">Resultado</th></tr></thead><tbody>${assetRows || '<tr><td colspan="4">Sem operações no período.</td></tr>'}</tbody></table>
+<h2>Operações</h2>
+<table><thead><tr><th>Data</th><th>Ativo</th><th>Lado</th><th>Setup</th><th class="r">Resultado</th></tr></thead><tbody>${tradeRows || '<tr><td colspan="5">Sem operações no período.</td></tr>'}</tbody></table>
+<div class="foot">Gerado pelo Tradefy em ${new Date().toLocaleDateString("pt-BR")}. Este relatório é um registro pessoal e não constitui recomendação de investimento.</div>
+</body></html>`;
+}
+
+function printHtmlInIframe(html) {
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) { notify("Não consegui abrir a impressão neste aparelho. Use o botão de baixar CSV.", "error"); }
+    setTimeout(() => iframe.remove(), 4000);
+  }, 350);
+}
+
+function ReportModal({ trades, accounts, accountFilterLabel, userName, onClose }) {
+  const [month, setMonth] = useState(localDateStr().slice(0, 7));
+  const monthTrades = useMemo(() => trades.filter((t) => t.trade_date.slice(0, 7) === month), [trades, month]);
+  const label = (() => {
+    const [y, m] = month.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  })();
+  const sm = summarizeTrades(monthTrades);
+  return (
+    <div className="tf-modal-overlay">
+      <div className="tf-modal" role="dialog" aria-modal="true" aria-label="Relatório e exportação">
+        <div className="tf-modal-head">
+          <h3>Relatório e exportação</h3>
+          <button className="tf-icon-btn" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
+        </div>
+        <div className="tf-form">
+          <div className="tf-form-row">
+            <label>Mês do relatório</label>
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </div>
+          <p className="tf-muted" style={{ margin: 0 }}>
+            {monthTrades.length === 0 ? "Nenhum trade nesse mês." : `${sm.count} trades · resultado ${fmtBRL(sm.pnl)} · acerto ${sm.winRate}%`}
+          </p>
+          <button type="button" className="tf-btn-primary tf-form-submit" disabled={monthTrades.length === 0}
+            onClick={() => printHtmlInIframe(buildReportHtml({ trades: monthTrades, periodLabel: label, userName, accountsLabel: accountFilterLabel }))}>
+            <FileText size={15} /> Gerar relatório (imprimir ou salvar em PDF)
+          </button>
+          <button type="button" className="tf-btn-outline" disabled={monthTrades.length === 0}
+            onClick={() => exportTradesCsv(monthTrades, accounts, `tradefy-${month}.csv`)}>
+            <Download size={15} /> Baixar trades do mês (CSV para Excel)
+          </button>
+          <button type="button" className="tf-btn-outline" disabled={trades.length === 0}
+            onClick={() => exportTradesCsv(trades, accounts, "tradefy-todos-os-trades.csv")}>
+            <Download size={15} /> Baixar todos os trades (CSV)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ------------------------------- UI bits -------------------------------- */
@@ -343,6 +647,7 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
     setParseError("");
     setParsing(true);
     try {
+      await loadImportLibs();
       const isExcel = /\.(xlsx|xls)$/i.test(file.name);
       if (isExcel) {
         const buffer = await file.arrayBuffer();
@@ -394,10 +699,10 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
 
   return (
     <div className="tf-modal-overlay">
-      <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()}>
+      <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tf-modal-head">
           <h3>Importar operações</h3>
-          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+          <button className="tf-icon-btn" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
         </div>
 
         {done ? (
@@ -503,7 +808,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
   const [side, setSide] = useState(editTrade?.side || "Compra");
   const [amount, setAmount] = useState(editTrade ? String(Math.abs(Number(editTrade.pnl))) : "");
   const [outcome, setOutcome] = useState(editTrade ? (Number(editTrade.pnl) >= 0 ? "win" : "loss") : "win");
-  const [date, setDate] = useState(editTrade?.trade_date || initialDate || new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(editTrade?.trade_date || initialDate || localDateStr());
   const [accountId, setAccountId] = useState(editTrade?.account_id || accounts[0]?.id || "");
   const [mood, setMood] = useState(editTrade?.mood || "");
   const [notes, setNotes] = useState(editTrade?.notes || "");
@@ -513,6 +818,11 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
   const [removeExisting, setRemoveExisting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [setup, setSetup] = useState(editTrade?.setup || "");
+  const [tags, setTags] = useState(editTrade?.tags || "");
+  const [tradeTime, setTradeTime] = useState(editTrade?.trade_time || "");
+  const [riskAmount, setRiskAmount] = useState(editTrade?.risk_amount ? String(editTrade.risk_amount) : "");
+  const [fees, setFees] = useState(editTrade?.fees ? String(editTrade.fees) : "");
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -550,17 +860,28 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
       await deleteTradeScreenshot(existingScreenshotPath);
     }
 
-    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId, mood: mood || null, notes: notes || null, screenshot_path });
+    // Campos novos: só vão pro banco se foram preenchidos (ou se existiam antes e
+    // foram apagados agora). Quem não usa esses campos não é afetado.
+    const extra = {};
+    const putTxt = (key, val, orig) => { const v = String(val || "").trim(); if (v) extra[key] = v; else if (editTrade && orig) extra[key] = null; };
+    const putNum = (key, val, orig) => { const n = parseFloat(String(val || "").replace(",", ".")); if (n > 0) extra[key] = n; else if (editTrade && orig) extra[key] = null; };
+    putTxt("setup", setup, editTrade?.setup);
+    putTxt("tags", tags, editTrade?.tags);
+    putTxt("trade_time", tradeTime, editTrade?.trade_time);
+    putNum("risk_amount", riskAmount, editTrade?.risk_amount);
+    putNum("fees", fees, editTrade?.fees);
+
+    await onSubmit({ asset: asset.toUpperCase(), side, pnl, trade_date: date, account_id: accountId, mood: mood || null, notes: notes || null, screenshot_path, ...extra });
     setSaving(false);
     onClose();
   };
 
   return (
     <div className="tf-modal-overlay">
-      <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="tf-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tf-modal-head">
           <h3>{editTrade ? "Editar trade" : "Registrar trade"}</h3>
-          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+          <button className="tf-icon-btn" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="tf-form">
           <div className="tf-form-row">
@@ -626,6 +947,40 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
               rows={3}
             />
           </div>
+
+          <details className="tf-more-details" open={!!(editTrade && (editTrade.setup || editTrade.tags || editTrade.trade_time || editTrade.risk_amount || editTrade.fees))}>
+            <summary>Mais detalhes (setup, horário, risco, custos)</summary>
+            <div className="tf-form" style={{ marginTop: 10 }}>
+              <div className="tf-form-row">
+                <label>Setup / estratégia</label>
+                <input value={setup} onChange={(e) => setSetup(e.target.value)} list="tf-setup-list" placeholder="Ex.: Rompimento, Pullback, Reversão" />
+                <datalist id="tf-setup-list">{KNOWN_SETUPS.map((n) => <option key={n} value={n} />)}</datalist>
+              </div>
+              <div className="tf-form-row-inline">
+                <div className="tf-form-row">
+                  <label>Horário da entrada</label>
+                  <input type="time" value={tradeTime} onChange={(e) => setTradeTime(e.target.value)} />
+                </div>
+                <div className="tf-form-row">
+                  <label>Risco planejado (R$)</label>
+                  <input value={riskAmount} onChange={(e) => setRiskAmount(e.target.value)} inputMode="decimal" placeholder="Quanto aceitava perder" />
+                </div>
+              </div>
+              <div className="tf-form-row-inline">
+                <div className="tf-form-row">
+                  <label>Custos / corretagem (R$)</label>
+                  <input value={fees} onChange={(e) => setFees(e.target.value)} inputMode="decimal" placeholder="Só para registro" />
+                </div>
+                <div className="tf-form-row">
+                  <label>Tags (separe por vírgula)</label>
+                  <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="notícia, contra tendência" />
+                </div>
+              </div>
+              <p className="tf-muted" style={{ margin: 0, fontSize: 11.5 }}>
+                Com o risco planejado preenchido, o Tradefy calcula o múltiplo R do trade (resultado ÷ risco). Os custos são só um registro: informe o resultado já líquido no campo P&L.
+              </p>
+            </div>
+          </details>
 
           <div className="tf-form-row">
             <label>Print do gráfico (opcional)</label>
@@ -707,8 +1062,178 @@ function AccountFilterDropdown({ accounts, selected, onChange }) {
   );
 }
 
-function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter, canShareWithMentor, onShareWithMentor }) {
+function DailyGuardCard({ todayPnl, todayCount, goal, stop, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [g, setG] = useState(goal ? String(goal) : "");
+  const [st, setSt] = useState(stop ? String(stop) : "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setG(goal ? String(goal) : ""); setSt(stop ? String(stop) : ""); }, [goal, stop]);
+  const parse = (v) => { const n = parseFloat(String(v).replace(",", ".")); return n > 0 ? n : null; };
+  const hasGoal = Number(goal) > 0;
+  const hasStop = Number(stop) > 0;
+  const stopHit = hasStop && todayPnl <= -Number(stop);
+  const stopNear = hasStop && !stopHit && todayPnl < 0 && Math.abs(todayPnl) >= Number(stop) * 0.8;
+  const goalHit = hasGoal && todayPnl >= Number(goal);
+  const goalPct = hasGoal ? Math.max(0, Math.min(100, (Math.max(todayPnl, 0) / Number(goal)) * 100)) : 0;
+  const stopPct = hasStop ? Math.max(0, Math.min(100, (Math.max(-todayPnl, 0) / Number(stop)) * 100)) : 0;
+  const save = async () => {
+    setSaving(true);
+    await onSave(parse(g), parse(st));
+    setSaving(false);
+    setEditing(false);
+  };
+  return (
+    <div className={`tf-card tf-guard-card ${stopHit ? "tf-guard-stop" : goalHit ? "tf-guard-goal" : ""}`}>
+      <div className="tf-card-head">
+        <h3>Disciplina do dia</h3>
+        <button type="button" className="tf-btn-outline tf-btn-small" onClick={() => setEditing((v) => !v)}>{editing ? "Cancelar" : hasGoal || hasStop ? "Editar meta e limite" : "Definir meta e limite"}</button>
+      </div>
+      {stopHit && <p className="tf-guard-alert text-coral"><AlertTriangle size={15} /> Limite de perda do dia atingido. Encerre as operações por hoje.</p>}
+      {stopNear && <p className="tf-guard-alert text-coral"><AlertTriangle size={15} /> Você já usou {Math.round(stopPct)}% do seu limite de perda do dia. Reduza o risco ou pare.</p>}
+      {goalHit && !stopHit && <p className="tf-guard-alert text-lime"><Check size={15} /> Meta do dia batida. Proteja o resultado e encerre.</p>}
+      <div className="tf-guard-top">
+        <div>
+          <span className="tf-muted" style={{ fontSize: 12 }}>Resultado de hoje</span>
+          <div className={`tf-mono tf-guard-value ${todayPnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(todayPnl)}</div>
+          <span className="tf-muted" style={{ fontSize: 12 }}>{todayCount} {todayCount === 1 ? "operação" : "operações"} hoje</span>
+        </div>
+        {(hasGoal || hasStop) && (
+          <div className="tf-guard-bars">
+            {hasGoal && (
+              <div>
+                <div className="tf-guard-bar-label"><span>Meta do dia</span><span className="tf-mono">{fmtBRL(Number(goal))}</span></div>
+                <div className="tf-progress"><div className="tf-progress-fill fill-lime" style={{ width: `${goalPct}%` }} /></div>
+              </div>
+            )}
+            {hasStop && (
+              <div>
+                <div className="tf-guard-bar-label"><span>Limite de perda</span><span className="tf-mono">{fmtBRL(-Number(stop))}</span></div>
+                <div className="tf-progress"><div className="tf-progress-fill fill-coral" style={{ width: `${stopPct}%` }} /></div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {!hasGoal && !hasStop && !editing && (
+        <p className="tf-muted" style={{ margin: "10px 0 0", fontSize: 12.5 }}>Defina quanto quer ganhar e quanto aceita perder por dia. O Tradefy te avisa quando chegar perto.</p>
+      )}
+      {editing && (
+        <div className="tf-form-row-inline" style={{ marginTop: 12 }}>
+          <div className="tf-form-row tf-inline-field">
+            <label>Meta do dia (R$)</label>
+            <input value={g} onChange={(e) => setG(e.target.value)} inputMode="decimal" placeholder="Ex.: 500" />
+          </div>
+          <div className="tf-form-row tf-inline-field">
+            <label>Limite de perda do dia (R$)</label>
+            <input value={st} onChange={(e) => setSt(e.target.value)} inputMode="decimal" placeholder="Ex.: 300" />
+          </div>
+          <button type="button" className="tf-btn-primary" onClick={save} disabled={saving} style={{ gridColumn: "1 / -1" }}>{saving ? "Salvando..." : "Salvar"}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WeeklySummaryCard({ trades }) {
+  const sm = useMemo(() => buildWeeklySummary(trades), [trades]);
+  const { cur, prev, insights, range } = sm;
+  const fmtR = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const diff = cur.pnl - prev.pnl;
+  return (
+    <div className="tf-card">
+      <div className="tf-card-head"><h3>Resumo da semana</h3><span className="tf-muted" style={{ fontSize: 12 }}>{fmtR(range[0])} a {fmtR(range[1])}</span></div>
+      {cur.count === 0 ? (
+        <p className="tf-empty">Nenhuma operação registrada nesta semana ainda.</p>
+      ) : (
+        <>
+          <div className="tf-week-grid">
+            <div><span className="tf-muted">Resultado</span><b className={`tf-mono ${cur.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(cur.pnl)}</b></div>
+            <div><span className="tf-muted">Operações</span><b className="tf-mono">{cur.count}</b></div>
+            <div><span className="tf-muted">Acerto</span><b className="tf-mono">{cur.winRate}%</b></div>
+            <div><span className="tf-muted">Vs. semana passada</span><b className={`tf-mono ${prev.count === 0 ? "" : diff >= 0 ? "text-lime" : "text-coral"}`}>{prev.count === 0 ? "—" : fmtBRL(diff)}</b></div>
+          </div>
+          {insights.length > 0 && (
+            <ul className="tf-insights">{insights.map((t, i) => <li key={i}>{t}</li>)}</ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdvancedMetricsCard({ data }) {
+  const money = (v) => fmtBRL(v).replace("+", "");
+  const items = [
+    { l: "Ganho médio", v: data.avgWin > 0 ? money(data.avgWin) : "—", c: "text-lime" },
+    { l: "Perda média", v: data.avgLoss > 0 ? money(-data.avgLoss) : "—", c: "text-coral" },
+    { l: "Payoff", v: data.payoff === null ? "—" : data.payoff.toFixed(2).replace(".", ","), tip: "ganho médio ÷ perda média" },
+    { l: "Expectativa por trade", v: data.rawTrades.length ? fmtBRL(data.expectancy) : "—", c: data.expectancy >= 0 ? "text-lime" : "text-coral" },
+    { l: "Maior sequência de ganhos", v: data.maxWinStreak || "—" },
+    { l: "Maior sequência de perdas", v: data.maxLossStreak || "—", c: data.maxLossStreak >= 4 ? "text-coral" : "" },
+    { l: "Melhor dia", v: data.bestDay ? fmtBRL(data.bestDay[1]) : "—", sub: data.bestDay ? `${data.bestDay[0].slice(8, 10)}/${data.bestDay[0].slice(5, 7)}` : "", c: "text-lime" },
+    { l: "Pior dia", v: data.worstDay ? fmtBRL(data.worstDay[1]) : "—", sub: data.worstDay ? `${data.worstDay[0].slice(8, 10)}/${data.worstDay[0].slice(5, 7)}` : "", c: data.worstDay && data.worstDay[1] < 0 ? "text-coral" : "" },
+  ];
+  if (data.rCount > 0) {
+    items.push({ l: "R médio", v: `${data.avgR >= 0 ? "+" : ""}${data.avgR.toFixed(2).replace(".", ",")} R`, sub: `em ${data.rCount} trades com risco`, c: data.avgR >= 0 ? "text-lime" : "text-coral" });
+  }
+  if (data.totalFees > 0) items.push({ l: "Custos registrados", v: money(data.totalFees) });
+  return (
+    <div className="tf-card" style={{ marginBottom: 16 }}>
+      <div className="tf-card-head"><h3>Métricas avançadas</h3></div>
+      <div className="tf-metrics-grid">
+        {items.map((it) => (
+          <div className="tf-metric" key={it.l} title={it.tip || ""}>
+            <span className="tf-metric-label">{it.l}</span>
+            <span className={`tf-mono tf-metric-value ${it.c || ""}`}>{it.v}</span>
+            {it.sub ? <span className="tf-metric-sub">{it.sub}</span> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GettingStartedCard({ data, hasLimits, onOpenModal, onOpenImport }) {
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem("tradefy-steps-hidden") === "1"; } catch (e) { return false; } });
+  const list = data.rawTrades;
+  const steps = [
+    { done: list.length > 0, label: "Registrar seu primeiro trade", action: onOpenModal, cta: "Registrar agora" },
+    { done: list.some((t) => t.mood || t.notes), label: "Anotar humor ou uma nota em um trade", hint: "É isso que mostra o padrão por trás dos seus erros." },
+    { done: hasLimits, label: "Definir sua meta e seu limite de perda do dia", hint: "Use o cartão \"Disciplina do dia\" abaixo." },
+    { done: list.length >= 10, label: "Chegar a 10 trades registrados", hint: "Com 10 trades, as métricas começam a ficar confiáveis.", action: onOpenImport, cta: "Importar relatório da corretora" },
+  ];
+  const doneCount = steps.filter((x) => x.done).length;
+  if (hidden || doneCount === steps.length) return null;
+  const hide = () => { setHidden(true); try { localStorage.setItem("tradefy-steps-hidden", "1"); } catch (e) { /* ok */ } };
+  return (
+    <div className="tf-card tf-steps-card">
+      <div className="tf-card-head">
+        <h3>Primeiros passos · {doneCount}/{steps.length}</h3>
+        <button type="button" className="tf-row-action" onClick={hide} aria-label="Esconder primeiros passos"><X size={14} /></button>
+      </div>
+      <ul className="tf-steps">
+        {steps.map((st) => (
+          <li key={st.label} className={st.done ? "done" : ""}>
+            <span className="tf-step-check">{st.done ? <Check size={13} /> : null}</span>
+            <div className="tf-step-body">
+              <span>{st.label}</span>
+              {!st.done && st.hint ? <span className="tf-muted" style={{ fontSize: 12 }}>{st.hint}</span> : null}
+            </div>
+            {!st.done && st.action ? <button type="button" className="tf-btn-outline tf-btn-small" onClick={st.action}>{st.cta}</button> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter, canShareWithMentor, onShareWithMentor, dailyGoal, dailyStop, onSaveDailyLimits, onOpenReport }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
+  const todayStats = useMemo(() => {
+    const today = localDateStr();
+    const list = data.rawTrades.filter((t) => t.trade_date === today);
+    return { pnl: list.reduce((sum, t) => sum + Number(t.pnl), 0), count: list.length };
+  }, [data.rawTrades]);
   return (
     <div className="tf-view">
       <div className="tf-view-header">
@@ -716,9 +1241,19 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
         <div className="tf-view-header-actions">
           <AccountFilterDropdown accounts={accounts} selected={accountFilter} onChange={setAccountFilter} />
           <button className="tf-btn-outline" onClick={onOpenImport}><FileSpreadsheet size={15} /> Importar relatório</button>
+          {onOpenReport && <button className="tf-btn-outline" onClick={onOpenReport}><Download size={15} /> Relatório</button>}
           <button className="tf-btn-primary" onClick={onOpenModal}><Plus size={15} /> Novo trade</button>
         </div>
       </div>
+
+      <GettingStartedCard data={data} hasLimits={Number(dailyGoal) > 0 || Number(dailyStop) > 0} onOpenModal={onOpenModal} onOpenImport={onOpenImport} />
+
+      {onSaveDailyLimits && (
+        <DailyGuardCard
+          todayPnl={todayStats.pnl} todayCount={todayStats.count}
+          goal={dailyGoal} stop={dailyStop} onSave={onSaveDailyLimits}
+        />
+      )}
 
       <div className="tf-stats-grid">
         <StatCard icon={Target} label="Win rate" value={`${winRate}%`} tone="up" />
@@ -748,6 +1283,47 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
           </AreaChart>
         </ResponsiveContainer>
       </div>
+
+      <div className="tf-two-col" style={{ marginBottom: 16 }}>
+        <WeeklySummaryCard trades={data.rawTrades} />
+        <div className="tf-card">
+          <div className="tf-card-head"><h3>Resultado por horário</h3></div>
+          {data.hourPerf.length === 0 ? (
+            <p className="tf-empty">Preencha o horário da entrada nos seus trades (em "Mais detalhes") para ver em quais horas você ganha e perde.</p>
+          ) : (
+            <div className="tf-table">
+              <div className="tf-table-row tf-table-head"><span>Hora</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
+              {data.hourPerf.map((h) => (
+                <div className="tf-table-row" key={h.hour}>
+                  <span className="tf-mono">{h.hour}h</span>
+                  <span className="tf-mono tf-muted">{h.trades}</span>
+                  <span className="tf-mono">{Math.round((h.wins / h.trades) * 100)}%</span>
+                  <span className={`tf-mono ${h.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(h.pnl)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <AdvancedMetricsCard data={data} />
+
+      {data.setupPerf.length > 0 && (
+        <div className="tf-card" style={{ marginBottom: 16 }}>
+          <div className="tf-card-head"><h3>Desempenho por setup</h3></div>
+          <div className="tf-table">
+            <div className="tf-table-row tf-table-head"><span>Setup</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
+            {data.setupPerf.map((x) => (
+              <div className="tf-table-row" key={x.setup}>
+                <span className="tf-asset">{x.setup}</span>
+                <span className="tf-mono tf-muted">{x.trades}</span>
+                <span className="tf-mono">{x.winRate}%</span>
+                <span className={`tf-mono ${x.pnl >= 0 ? "text-lime" : "text-coral"}`}>{fmtBRL(x.pnl)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="tf-card" style={{ marginBottom: 16 }}>
         <div className="tf-card-head"><h3>Performance por dia da semana</h3></div>
@@ -835,10 +1411,20 @@ function TradeRowExpanded({ trade }) {
     return () => { active = false; };
   }, [trade.screenshot_path]);
 
-  if (!trade.notes && !trade.screenshot_path) return null;
+  const rMult = Number(trade.risk_amount) > 0 ? Number(trade.pnl) / Number(trade.risk_amount) : null;
+  const chips = [
+    trade.trade_time && `Hora ${trade.trade_time}`,
+    trade.setup && `Setup: ${trade.setup}`,
+    rMult !== null && `${rMult >= 0 ? "+" : ""}${rMult.toFixed(2).replace(".", ",")} R`,
+    trade.fees > 0 && `Custos ${fmtBRL(Number(trade.fees)).replace("+", "")}`,
+    ...(trade.tags ? String(trade.tags).split(",").map((x) => x.trim()).filter(Boolean).map((x) => `#${x}`) : []),
+  ].filter(Boolean);
+
+  if (!trade.notes && !trade.screenshot_path && chips.length === 0) return null;
 
   return (
     <div className="tf-trade-expanded">
+      {chips.length > 0 && <div className="tf-chip-row">{chips.map((c, i) => <span className="tf-chip" key={i}>{c}</span>)}</div>}
       {trade.notes && <p className="tf-trade-notes">{trade.notes}</p>}
       {trade.screenshot_path && (
         loadingImg ? (
@@ -860,10 +1446,10 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade
   const total = dayTrades.reduce((s, t) => s + Number(t.pnl), 0);
   return (
     <div className="tf-modal-overlay">
-      <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="tf-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tf-modal-head">
           <h3>{dateLabel}</h3>
-          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+          <button className="tf-icon-btn" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
         </div>
         {dayTrades.length > 0 ? (
           <>
@@ -1098,8 +1684,8 @@ function AccountCard({ account, onUpdate, onDelete }) {
     setEditing(false);
   };
 
-  const handleDelete = () => {
-    if (window.confirm(`Apagar a conta "${account.name}"? Todos os trades registrados nela também serão apagados. Essa ação não pode ser desfeita.`)) {
+  const handleDelete = async () => {
+    if (await askConfirm(`Apagar a conta "${account.name}"? Todos os trades registrados nela também serão apagados. Essa ação não pode ser desfeita.`)) {
       onDelete(account.id);
     }
   };
@@ -1293,7 +1879,7 @@ function MfaEnrollCard() {
 
   const removeFactor = async () => {
     if (!factor) return;
-    if (!window.confirm("Desativar a autenticação em duas etapas dessa conta?")) return;
+    if (!(await askConfirm("Desativar a autenticação em duas etapas dessa conta?"))) return;
     setBusy(true);
     const { error } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
     setBusy(false);
@@ -2253,8 +2839,16 @@ function MacroMapView() {
   const [loadingData, setLoadingData] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let cleanupGlobe = null;
+    import("three").then((mod) => {
+      if (cancelled) return;
+      THREE = mod;
+      cleanupGlobe = initGlobe();
+    });
+    const initGlobe = () => {
     const mount = mountRef.current;
-    if (!mount) return;
+    if (!mount) return null;
 
     const width = mount.clientWidth;
     const height = mount.clientHeight;
@@ -2435,6 +3029,8 @@ function MacroMapView() {
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
+    };
+    return () => { cancelled = true; if (cleanupGlobe) cleanupGlobe(); };
   }, []);
 
   const loadCountry = async (country) => {
@@ -2732,7 +3328,7 @@ function StudentMentorView({ session, mentors, loadingMentors }) {
       { onConflict: "student_user_id" }
     );
     setSaving(false);
-    if (error) { alert("Não consegui selecionar o mentor: " + error.message); return; }
+    if (error) { notify("Não consegui selecionar o mentor: " + error.message); return; }
     setMyLink({ mentor_id: mentorId, status: "pending" });
   };
 
@@ -2845,7 +3441,7 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
     setCreating(true);
     const { error } = await supabase.from("mentors").insert({ name: newMentorName.trim(), bio: newMentorBio.trim() || null });
     setCreating(false);
-    if (error) { alert("Não consegui criar o mentor: " + error.message); return; }
+    if (error) { notify("Não consegui criar o mentor: " + error.message); return; }
     setNewMentorName(""); setNewMentorBio("");
     await reloadMentors();
   };
@@ -2867,15 +3463,15 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
     setSavingEdit(true);
     const { error } = await supabase.from("mentors").update({ name: editName.trim(), bio: editBio.trim() || null }).eq("id", mentorId);
     setSavingEdit(false);
-    if (error) { alert("Não consegui salvar as alterações: " + error.message); return; }
+    if (error) { notify("Não consegui salvar as alterações: " + error.message); return; }
     cancelEditMentor();
     await reloadMentors();
   };
 
   const handleDeleteMentor = async (mentor) => {
-    if (!window.confirm(`Apagar o mentor "${mentor.name}"? Isso também apaga as mensagens enviadas por ele e desvincula os alunos que o seguem. Essa ação não pode ser desfeita.`)) return;
+    if (!(await askConfirm(`Apagar o mentor "${mentor.name}"? Isso também apaga as mensagens enviadas por ele e desvincula os alunos que o seguem. Essa ação não pode ser desfeita.`))) return;
     const { error } = await supabase.from("mentors").delete().eq("id", mentor.id);
-    if (error) { alert("Não consegui apagar o mentor: " + error.message); return; }
+    if (error) { notify("Não consegui apagar o mentor: " + error.message); return; }
     await reloadMentors();
   };
 
@@ -2885,20 +3481,20 @@ function MentorDashboardView({ session, mentors, myMentor, reloadMentors }) {
     setSending(true);
     const { error } = await supabase.from("mentor_messages").insert({ mentor_id: myMentor.id, content: messageText.trim() });
     setSending(false);
-    if (error) { alert("Não consegui enviar a mensagem: " + error.message); return; }
+    if (error) { notify("Não consegui enviar a mensagem: " + error.message); return; }
     setMessageText("");
     await loadMyMessages();
   };
 
   const handleApprove = async (requestId) => {
     const { error } = await supabase.from("mentor_students").update({ status: "approved" }).eq("id", requestId);
-    if (error) { alert("Não consegui aprovar: " + error.message); return; }
+    if (error) { notify("Não consegui aprovar: " + error.message); return; }
     await loadPending();
   };
 
   const handleReject = async (requestId) => {
     const { error } = await supabase.from("mentor_students").update({ status: "rejected" }).eq("id", requestId);
-    if (error) { alert("Não consegui recusar: " + error.message); return; }
+    if (error) { notify("Não consegui recusar: " + error.message); return; }
     await loadPending();
   };
 
@@ -3100,7 +3696,7 @@ function RankingView({ session }) {
       market: newMarket,
     });
     setCreating(false);
-    if (error) { alert("Não consegui adicionar: " + error.message); return; }
+    if (error) { notify("Não consegui adicionar: " + error.message); return; }
     setNewPosition(""); setNewName(""); setNewInstagram(""); setNewScoreText(""); setNewMarket("B3");
     await loadEntries();
   };
@@ -3127,15 +3723,15 @@ function RankingView({ session }) {
       market: editMarket,
     }).eq("id", id);
     setSavingEdit(false);
-    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    if (error) { notify("Não consegui salvar: " + error.message); return; }
     setEditingId(null);
     await loadEntries();
   };
 
   const handleDelete = async (entry) => {
-    if (!window.confirm(`Remover "${entry.display_name}" do ranking?`)) return;
+    if (!(await askConfirm(`Remover "${entry.display_name}" do ranking?`))) return;
     const { error } = await supabase.from("trader_rankings").delete().eq("id", entry.id);
-    if (error) { alert("Não consegui remover: " + error.message); return; }
+    if (error) { notify("Não consegui remover: " + error.message); return; }
     await loadEntries();
   };
 
@@ -3614,7 +4210,39 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
 
 /* --------------------------------- App ----------------------------------- */
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, resetKey: props.resetKey }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  static getDerivedStateFromProps(props, state) {
+    // trocar de tela limpa o erro, pra pessoa não ficar presa
+    if (props.resetKey !== state.resetKey) return { hasError: false, resetKey: props.resetKey };
+    return null;
+  }
+  componentDidCatch(error, info) { console.error("Erro de tela:", error, info); }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="tf-view">
+        <div className="tf-card" style={{ maxWidth: 520, margin: "40px auto", textAlign: "center" }}>
+          <AlertCircle size={32} className="text-coral" />
+          <h3 style={{ margin: "12px 0 6px" }}>Algo deu errado nesta tela</h3>
+          <p className="tf-muted" style={{ marginBottom: 16 }}>Seus dados estão salvos. Tente abrir a tela de novo ou atualize a página.</p>
+          <button className="tf-btn-primary" onClick={() => window.location.reload()}>Atualizar a página</button>
+        </div>
+      </div>
+    );
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary resetKey="root">
+      <AppInner />
+    </ErrorBoundary>
+  );
+}
+
+function AppInner() {
   const [session, setSession] = useState(null);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [loadingSession, setLoadingSession] = useState(true);
@@ -3627,9 +4255,19 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         const rate = parseFloat(data?.USDBRL?.bid);
-        if (rate > 0) setUsdRate(rate);
+        if (rate > 0) {
+          setUsdRate(rate);
+          try { localStorage.setItem("tradefy-usd-rate", JSON.stringify({ rate, at: Date.now() })); } catch (e) { /* ok */ }
+        } else throw new Error("cotação inválida");
       })
-      .catch((err) => console.error("Não consegui buscar a cotação do dólar:", err));
+      .catch((err) => {
+        console.error("Não consegui buscar a cotação do dólar:", err);
+        // Plano B: usa a última cotação guardada neste aparelho (até 7 dias)
+        try {
+          const saved = JSON.parse(localStorage.getItem("tradefy-usd-rate") || "null");
+          if (saved?.rate > 0 && Date.now() - saved.at < 7 * 24 * 3600 * 1000) setUsdRate(saved.rate);
+        } catch (e) { /* ok */ }
+      });
   }, []);
   const [accounts, setAccounts] = useState([]);
   const [trades, setTrades] = useState([]);
@@ -3640,6 +4278,7 @@ export default function App() {
   const [showModal, setShowModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [accountFilter, setAccountFilter] = useState([]); // [] = todas as contas
   const [theme, setTheme] = useState(() => {
@@ -3656,6 +4295,34 @@ export default function App() {
       return next;
     });
   };
+
+  // Esc fecha a popup que estiver por cima (as popups não fecham mais ao clicar fora)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (document.querySelector(".tf-confirm-overlay")) return;
+      const modals = document.querySelectorAll(".tf-modal");
+      const top = modals[modals.length - 1];
+      const closeBtn = top && top.querySelector(".tf-modal-head .tf-icon-btn");
+      if (closeBtn) closeBtn.click();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // App instalável (PWA) + funcionamento básico sem internet
+  useEffect(() => {
+    try {
+      if (!document.querySelector('link[rel="manifest"]')) {
+        const l = document.createElement("link");
+        l.rel = "manifest"; l.href = "/manifest.webmanifest";
+        document.head.appendChild(l);
+      }
+      if ("serviceWorker" in navigator && window.location.protocol === "https:" && !window.Capacitor) {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      }
+    } catch (e) { /* sem problema: o app segue funcionando */ }
+  }, []);
 
   // iOS Safari reveals the browser's default white background during the
   // "bounce"/elastic overscroll effect. Keep html/body painted the same
@@ -3713,7 +4380,14 @@ export default function App() {
     const { data: accountsData } = await supabase.from("accounts").select("*").eq("user_id", userId).order("created_at");
     setAccounts(accountsData || []);
 
-    const { data: tradesData } = await supabase.from("trades").select("*").eq("user_id", userId).order("trade_date", { ascending: false });
+    const { data: tradesData, error: tradesLoadError } = await fetchAllRows(() =>
+      supabase.from("trades").select("*").eq("user_id", userId)
+        .order("trade_date", { ascending: false }).order("id", { ascending: true })
+    );
+    if (tradesLoadError) {
+      console.error("carregar trades", tradesLoadError);
+      notify("Não consegui carregar todos os seus trades agora. Atualize a página em instantes.", "error");
+    }
     setTrades(tradesData || []);
 
     // Confere se esse e-mail tem uma compra na Cakto ou uma liberação manual
@@ -3740,7 +4414,7 @@ export default function App() {
 
   const reportError = (error, action) => {
     console.error(action, error);
-    alert(`Não consegui ${action}. ${error?.message ? `Detalhe: ${error.message}` : "Tenta de novo em instantes."}`);
+    notify(`Não consegui ${action}. ${error?.message ? `Detalhe: ${error.message}` : "Tenta de novo em instantes."}`);
   };
 
   const handleOnboardingComplete = async (name, firstAccount) => {
@@ -3765,35 +4439,46 @@ export default function App() {
     const userId = session.user.id;
     const { replaceAccountId } = options;
 
-    // Se o cliente marcou "substituir", apaga as operações antigas dessa
-    // conta antes de gravar as novas — evita duplicar quando ele reimporta
-    // um relatório atualizado (ex: baixou o relatório do mês de novo).
-    let removedSum = 0;
+    // Importação segura: primeiro GRAVA as operações novas; só depois, com tudo
+    // salvo, apaga as antigas (quando o cliente marcou "substituir"). Assim, se
+    // a internet cair no meio, ele nunca fica sem o histórico.
+    let oldTrades = [];
     if (replaceAccountId) {
-      const { data: existingTrades, error: fetchErr } = await supabase
-        .from("trades")
-        .select("id, pnl, screenshot_path")
-        .eq("account_id", replaceAccountId)
-        .eq("user_id", userId);
+      const { data: existingTrades, error: fetchErr } = await fetchAllRows(() =>
+        supabase.from("trades").select("id, pnl, screenshot_path")
+          .eq("account_id", replaceAccountId).eq("user_id", userId).order("id", { ascending: true })
+      );
       if (fetchErr) return reportError(fetchErr, "buscar as operações antigas dessa conta");
-
-      if (existingTrades && existingTrades.length > 0) {
-        removedSum = existingTrades.reduce((s, t) => s + Number(t.pnl), 0);
-        for (const t of existingTrades) {
-          if (t.screenshot_path) await deleteTradeScreenshot(t.screenshot_path);
-        }
-        const { error: delErr } = await supabase
-          .from("trades")
-          .delete()
-          .eq("account_id", replaceAccountId)
-          .eq("user_id", userId);
-        if (delErr) return reportError(delErr, "apagar as operações antigas dessa conta");
-      }
+      oldTrades = existingTrades || [];
     }
 
     const rowsToInsert = importedTrades.map((t) => ({ ...t, user_id: userId }));
-    const { error: insertError } = await supabase.from("trades").insert(rowsToInsert);
-    if (insertError) return reportError(insertError, "importar as operações");
+    const insertedIds = [];
+    for (let i = 0; i < rowsToInsert.length; i += 300) {
+      const chunk = rowsToInsert.slice(i, i + 300);
+      const { data: ins, error: insertError } = await supabase.from("trades").insert(chunk).select("id");
+      if (insertError) {
+        // desfaz o que já tinha entrado, pra não deixar importação pela metade
+        for (let k = 0; k < insertedIds.length; k += 100) {
+          await supabase.from("trades").delete().in("id", insertedIds.slice(k, k + 100)).eq("user_id", userId);
+        }
+        return reportError(insertError, "importar as operações (nada foi alterado)");
+      }
+      (ins || []).forEach((r) => insertedIds.push(r.id));
+    }
+
+    let removedSum = 0;
+    if (oldTrades.length > 0) {
+      for (let k = 0; k < oldTrades.length; k += 100) {
+        const ids = oldTrades.slice(k, k + 100).map((t) => t.id);
+        const { error: delErr } = await supabase.from("trades").delete().in("id", ids).eq("user_id", userId);
+        if (delErr) return reportError(delErr, "apagar as operações antigas dessa conta (as novas já foram salvas; reimporte marcando substituir de novo)");
+      }
+      removedSum = oldTrades.reduce((sum, t) => sum + Number(t.pnl), 0);
+      for (const t of oldTrades) {
+        if (t.screenshot_path) await deleteTradeScreenshot(t.screenshot_path);
+      }
+    }
 
     const totalByAccount = {};
     importedTrades.forEach((t) => {
@@ -3838,14 +4523,14 @@ export default function App() {
   };
 
   const confirmAndDeleteTrade = async (trade) => {
-    if (window.confirm(`Apagar o trade de ${trade.asset} (${fmtBRL(Number(trade.pnl))})? Essa ação não pode ser desfeita.`)) {
+    if (await askConfirm(`Apagar o trade de ${trade.asset} (${fmtBRL(Number(trade.pnl))})? Essa ação não pode ser desfeita.`)) {
       await handleDeleteTrade(trade);
     }
   };
 
   const handleAddAccount = async (acc) => {
     if (accounts.length >= accountLimit) {
-      alert(
+      notify(
         isProPlan
           ? "Você atingiu o limite de 5 contas do plano Pro."
           : "O plano Starter permite apenas 1 conta. Faça upgrade para o Pro para adicionar até 5 contas."
@@ -3876,6 +4561,13 @@ export default function App() {
 
   const handleUpdateProfile = async (name) => {
     await supabase.from("profiles").update({ name }).eq("id", session.user.id);
+    await loadUserData();
+  };
+
+  const handleSaveDailyLimits = async (goal, stop) => {
+    const { error } = await supabase.from("profiles").update({ daily_goal: goal, daily_stop: stop }).eq("id", session.user.id);
+    if (error) return reportError(error, "salvar sua meta e seu limite do dia");
+    notify("Meta e limite do dia salvos.", "info");
     await loadUserData();
   };
 
@@ -3910,25 +4602,33 @@ export default function App() {
   // Botão "Compartilhar com seu mentor": só pra aluno liberado pelo mentor (nunca pro próprio dono)
   const canShareWithMentor = hasStudentPanelAccess && !isOwnerAccount;
 
+  const dashExtras = {
+    dailyGoal: profile?.daily_goal,
+    dailyStop: profile?.daily_stop,
+    onSaveDailyLimits: handleSaveDailyLimits,
+    onOpenReport: () => setShowReportModal(true),
+  };
+
   const view = (() => {
     switch (active) {
-      case "dashboard": return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
+      case "dashboard": return <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "calendar": return <CalendarView trades={trades} accounts={accounts} onNewTrade={handleNewTrade} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} />;
-      case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
+      case "painel-aluno": return hasStudentPanelAccess ? <StudentPanelView session={session} isOwnerAccount={isOwnerAccount} /> : <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "propdesk": return <PropDeskView isProPlan={isProPlan} />;
       case "mentors": return <MentoresView session={session} isMentorBetaTester={isMentorBetaTester} />;
       case "ranking": return <RankingView session={session} />;
-      case "resultados-alunos": return isOwnerAccount ? <StudentResultsView /> : <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
+      case "resultados-alunos": return isOwnerAccount ? <StudentResultsView /> : <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
       case "mindset": return <MindsetView trades={trades} isProPlan={isProPlan} />;
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
       case "tools": return <ToolsView />;
       case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currency={profile?.currency || "BRL"} onUpdateCurrency={handleUpdateCurrency} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
       case "plans": return <PlansView currentPlan={subscription?.plan} />;
-      default: return <DashboardView data={data} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
+      default: return <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
     }
   })();
 
+  KNOWN_SETUPS = [...new Set(trades.map((t) => (t.setup || "").trim()).filter(Boolean))].slice(0, 40);
   CURRENCY_MODE = profile?.currency || "BRL";
   USD_BRL_RATE = usdRate || 1;
 
@@ -3951,7 +4651,7 @@ export default function App() {
           {session && !checkingMfa && !mfaNeeded && profile && hasActiveAccess && (
             <>
               <div className="tf-mobile-topbar">
-                <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)}><Menu size={20} /></button>
+                <button className="tf-hamburger-btn" onClick={() => setMobileNavOpen(true)} aria-label="Abrir menu"><Menu size={20} /></button>
                 <img src={LOGO_MARK} alt="Tradefy" className="tf-brand-mark-img" />
                 <span className="tf-brand-name">TRADE<span className="text-lime">FY</span></span>
           </div>
@@ -3965,9 +4665,18 @@ export default function App() {
             hasStudentPanelAccess={hasStudentPanelAccess}
             isMentorBetaTester={isMentorBetaTester}
           />
-          {view}
+          <ErrorBoundary resetKey={active}>{view}</ErrorBoundary>
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
           {showShareModal && canShareWithMentor && <ShareWithMentorModal session={session} accounts={accounts} trades={trades} onClose={() => setShowShareModal(false)} />}
+          {showReportModal && (
+            <ReportModal
+              trades={filteredTrades}
+              accounts={filteredAccountObjs}
+              userName={profile?.name}
+              accountFilterLabel={accountFilter.length === 0 ? "Todas as contas" : filteredAccountObjs.map((a) => a.name).join(", ")}
+              onClose={() => setShowReportModal(false)}
+            />
+          )}
           {showImportModal && <ImportTradesModal onClose={() => setShowImportModal(false)} onImport={handleImportTrades} accounts={accounts} />}
           {editingTrade && (
             <NewTradeModal
@@ -3981,6 +4690,7 @@ export default function App() {
       )}
         </>
       )}
+      <UiHosts />
       <a
         href="https://wa.me/5511993283482?text=Ol%C3%A1!%20Preciso%20de%20ajuda%20com%20o%20Tradefy."
         target="_blank"
@@ -3991,6 +4701,62 @@ export default function App() {
         <svg width="26" height="26" viewBox="0 0 24 24" fill="white"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.9-4.45 9.9-9.9C21.96 6.45 17.5 2 12.04 2Zm5.9 14.02c-.25.7-1.45 1.33-2 1.42-.51.08-1.15.11-1.86-.12-.43-.14-.98-.32-1.68-.62-2.96-1.28-4.89-4.26-5.04-4.46-.15-.2-1.21-1.6-1.21-3.06s.77-2.17 1.04-2.47c.27-.3.6-.37.8-.37h.57c.18 0 .43-.07.66.51.25.61.85 2.11.92 2.26.07.15.12.33.02.53-.1.2-.15.32-.3.5-.15.18-.31.4-.44.53-.15.15-.3.31-.13.6.17.3.76 1.26 1.64 2.04 1.13 1.01 2.08 1.32 2.38 1.47.3.15.47.13.65-.08.18-.2.75-.87.95-1.17.2-.3.4-.24.65-.15.27.1 1.71.81 2 .96.3.15.5.22.57.35.08.13.08.75-.17 1.45Z"/></svg>
       </a>
     </div>
+  );
+}
+
+function UiHosts() {
+  const [toasts, setToasts] = useState([]);
+  const [dialog, setDialog] = useState(null);
+  const [offline, setOffline] = useState(typeof navigator !== "undefined" && navigator.onLine === false);
+  useEffect(() => {
+    const on = () => setOffline(false);
+    const off = () => setOffline(true);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  useEffect(() => {
+    uiBus.toast = (message, kind) => {
+      const id = Date.now() + Math.random();
+      setToasts((prev) => [...prev.slice(-3), { id, message, kind }]);
+      setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), kind === "error" ? 7000 : 4500);
+    };
+    uiBus.confirm = (message, opts) => new Promise((resolve) => setDialog({ message, opts, resolve }));
+    return () => { uiBus.toast = null; uiBus.confirm = null; };
+  }, []);
+  const answer = (v) => { dialog?.resolve(v); setDialog(null); };
+  useEffect(() => {
+    if (!dialog) return;
+    const onKey = (e) => { if (e.key === "Escape") { dialog.resolve(false); setDialog(null); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dialog]);
+  const danger = !dialog || dialog.opts?.danger !== false;
+  return (
+    <>
+      {offline && <div className="tf-offline-bar" role="status">Sem conexão com a internet. Seus dados podem estar desatualizados e novos registros não serão salvos até voltar.</div>}
+      <div className="tf-toast-stack" aria-live="polite" role="status">
+        {toasts.map((t) => (
+          <div key={t.id} className={`tf-toast ${t.kind === "error" ? "tf-toast-error" : ""}`}>
+            <span>{t.message}</span>
+            <button type="button" aria-label="Fechar aviso" onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}><X size={14} /></button>
+          </div>
+        ))}
+      </div>
+      {dialog && (
+        <div className="tf-modal-overlay tf-confirm-overlay">
+          <div className="tf-modal tf-confirm-modal" role="alertdialog" aria-modal="true" aria-label="Confirmação">
+            <p className="tf-confirm-text">{dialog.message}</p>
+            <div className="tf-confirm-actions">
+              <button type="button" className="tf-btn-outline" onClick={() => answer(false)}>Cancelar</button>
+              <button type="button" className={danger ? "tf-btn-primary tf-btn-danger-solid" : "tf-btn-primary"} onClick={() => answer(true)} autoFocus>
+                {dialog.opts?.confirmLabel || "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -4019,13 +4785,13 @@ function CoverUploadButton({ onUploaded, title = "Trocar capa", className = "tf-
   const handleChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("Imagem muito grande — o limite é 5MB."); e.target.value = ""; return; }
+    if (file.size > 5 * 1024 * 1024) { notify("Imagem muito grande — o limite é 5MB."); e.target.value = ""; return; }
     setUploading(true);
     try {
       const url = await uploadCoverImage(file);
       await onUploaded(url);
     } catch (err) {
-      alert("Não consegui subir a imagem: " + (err.message || "erro desconhecido"));
+      notify("Não consegui subir a imagem: " + (err.message || "erro desconhecido"));
     }
     setUploading(false);
     e.target.value = "";
@@ -4161,9 +4927,9 @@ function ShareWithMentorModal({ session, accounts, trades, onClose }) {
   };
 
   const handleRetract = async (share) => {
-    if (!window.confirm("Retirar esse envio? O mentor deixa de ver esses resultados imediatamente.")) return;
+    if (!(await askConfirm("Retirar esse envio? O mentor deixa de ver esses resultados imediatamente."))) return;
     const { error: delError } = await supabase.from("student_shares").delete().eq("id", share.id).eq("user_id", session.user.id);
-    if (delError) { alert("Não consegui retirar o envio: " + delError.message); return; }
+    if (delError) { notify("Não consegui retirar o envio: " + delError.message); return; }
     await loadMyShares();
   };
 
@@ -4171,10 +4937,10 @@ function ShareWithMentorModal({ session, accounts, trades, onClose }) {
 
   return (
     <div className="tf-modal-overlay">
-      <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()}>
+      <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tf-modal-head">
           <h3>Compartilhar com seu mentor</h3>
-          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+          <button className="tf-icon-btn" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
         </div>
 
         {sent ? (
@@ -4328,9 +5094,12 @@ function ShareDetail({ share, onBack }) {
     (async () => {
       setLoading(true);
       const [{ data: tradesData, error: tradesError }, { data: accData }] = await Promise.all([
-        supabase.from("trades").select("*").eq("user_id", share.user_id)
-          .gte("trade_date", share.period_start).lte("trade_date", share.period_end)
-          .in("account_id", share.account_ids).order("trade_date", { ascending: false }),
+        fetchAllRows(() =>
+          supabase.from("trades").select("*").eq("user_id", share.user_id)
+            .gte("trade_date", share.period_start).lte("trade_date", share.period_end)
+            .in("account_id", share.account_ids)
+            .order("trade_date", { ascending: false }).order("id", { ascending: true })
+        ),
         supabase.from("accounts").select("id, name, type").in("id", share.account_ids),
       ]);
       if (!active) return;
@@ -4821,10 +5590,10 @@ function VideoPlayerModal({ video, onClose }) {
 
   return (
     <div className="tf-modal-overlay">
-      <div className="tf-modal tf-modal-video" onClick={(e) => e.stopPropagation()}>
+      <div className="tf-modal tf-modal-video" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tf-modal-head">
           <h3>{video.title}</h3>
-          <button className="tf-icon-btn" onClick={onClose}><X size={16} /></button>
+          <button className="tf-icon-btn" onClick={onClose} aria-label="Fechar"><X size={16} /></button>
         </div>
         {error ? (
           <p className="text-coral" style={{ padding: "10px 0" }}>{error}</p>
@@ -4903,7 +5672,7 @@ function MaterialAttachButton({ video, onSelected, onRemove }) {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
-    if (f.size > 50 * 1024 * 1024) { alert("Arquivo muito grande — o limite da apostila é 50MB."); return; }
+    if (f.size > 50 * 1024 * 1024) { notify("Arquivo muito grande — o limite da apostila é 50MB."); return; }
     setBusy(true);
     try { await onSelected(f); } finally { setBusy(false); }
   };
@@ -5012,7 +5781,7 @@ function StudentContentManager() {
       position: categories.length,
     });
     setSavingCat(false);
-    if (error) { alert("Não consegui criar a categoria: " + error.message); return; }
+    if (error) { notify("Não consegui criar a categoria: " + error.message); return; }
     setNewCatName(""); setNewCatDesc(""); setShowNewCategory(false);
     await load();
   };
@@ -5029,7 +5798,7 @@ function StudentContentManager() {
       name: editCatName.trim(),
       description: editCatDesc.trim() || null,
     }).eq("id", id);
-    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    if (error) { notify("Não consegui salvar: " + error.message); return; }
     setEditingCatId(null);
     await load();
   };
@@ -5037,15 +5806,15 @@ function StudentContentManager() {
   const handleDeleteCategory = async (cat) => {
     const catVideos = videos.filter((v) => v.category_id === cat.id);
     if (catVideos.length > 0) {
-      if (!window.confirm(`A categoria "${cat.name}" tem ${catVideos.length} vídeo(s). Apagar a categoria também apaga esses vídeos (inclusive no Bunny Stream) e os módulos dela. Essa ação não pode ser desfeita. Continuar?`)) return;
+      if (!(await askConfirm(`A categoria "${cat.name}" tem ${catVideos.length} vídeo(s). Apagar a categoria também apaga esses vídeos (inclusive no Bunny Stream) e os módulos dela. Essa ação não pode ser desfeita. Continuar?`))) return;
       for (const v of catVideos) {
         await supabase.functions.invoke("bunny-stream", { body: { action: "delete-video", id: v.id } });
       }
     } else {
-      if (!window.confirm(`Apagar a categoria "${cat.name}"?`)) return;
+      if (!(await askConfirm(`Apagar a categoria "${cat.name}"?`))) return;
     }
     const { error } = await supabase.from("student_categories").delete().eq("id", cat.id);
-    if (error) { alert("Não consegui apagar a categoria: " + error.message); return; }
+    if (error) { notify("Não consegui apagar a categoria: " + error.message); return; }
     await load();
   };
 
@@ -5060,7 +5829,7 @@ function StudentContentManager() {
       position: modules.filter((m) => m.category_id === categoryId).length,
     });
     setSavingMod(false);
-    if (error) { alert("Não consegui criar o módulo: " + error.message); return; }
+    if (error) { notify("Não consegui criar o módulo: " + error.message); return; }
     setNewModName(""); setNewModDesc(""); setShowNewModuleForCat(null);
     await load();
   };
@@ -5077,7 +5846,7 @@ function StudentContentManager() {
       name: editModName.trim(),
       description: editModDesc.trim() || null,
     }).eq("id", id);
-    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    if (error) { notify("Não consegui salvar: " + error.message); return; }
     setEditingModId(null);
     await load();
   };
@@ -5087,9 +5856,9 @@ function StudentContentManager() {
     const msg = modVideos.length > 0
       ? `Apagar o módulo "${mod.name}"? As ${modVideos.length} aula(s) dele NÃO são apagadas — só ficam sem módulo dentro da categoria.`
       : `Apagar o módulo "${mod.name}"?`;
-    if (!window.confirm(msg)) return;
+    if (!(await askConfirm(msg))) return;
     const { error } = await supabase.from("student_modules").delete().eq("id", mod.id);
-    if (error) { alert("Não consegui apagar o módulo: " + error.message); return; }
+    if (error) { notify("Não consegui apagar o módulo: " + error.message); return; }
     await load();
   };
 
@@ -5107,15 +5876,15 @@ function StudentContentManager() {
       description: editVideoDesc.trim() || null,
     }).eq("id", id);
     setSavingVideo(false);
-    if (error) { alert("Não consegui salvar: " + error.message); return; }
+    if (error) { notify("Não consegui salvar: " + error.message); return; }
     setEditingVideoId(null);
     await load();
   };
 
   const handleDeleteVideo = async (video) => {
-    if (!window.confirm(`Apagar o vídeo "${video.title}"? Essa ação remove o vídeo do Bunny Stream também e não pode ser desfeita.`)) return;
+    if (!(await askConfirm(`Apagar o vídeo "${video.title}"? Essa ação remove o vídeo do Bunny Stream também e não pode ser desfeita.`))) return;
     const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "delete-video", id: video.id } });
-    if (error || data?.error) { alert("Não consegui apagar o vídeo: " + (data?.error || error.message)); return; }
+    if (error || data?.error) { notify("Não consegui apagar o vídeo: " + (data?.error || error.message)); return; }
     await load();
   };
 
@@ -5130,27 +5899,27 @@ function StudentContentManager() {
     onDelete: () => handleDeleteVideo(v),
     onCoverUploaded: async (url) => {
       const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
-      if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
+      if (error) { notify("Não consegui salvar a capa: " + error.message); return; }
       await load();
     },
     onMaterialSelected: async (file) => {
       const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
       const path = `${v.id}/${Date.now()}-${safeName}`;
       const { error: upError } = await supabase.storage.from("student-materials").upload(path, file, { upsert: false, contentType: file.type || undefined });
-      if (upError) { alert("Não consegui enviar a apostila: " + upError.message); return; }
+      if (upError) { notify("Não consegui enviar a apostila: " + upError.message); return; }
       const { error } = await supabase.from("student_videos").update({ material_path: path, material_name: file.name }).eq("id", v.id);
       if (error) {
         await supabase.storage.from("student-materials").remove([path]);
-        alert("Não consegui salvar a apostila: " + error.message);
+        notify("Não consegui salvar a apostila: " + error.message);
         return;
       }
       if (v.material_path) await supabase.storage.from("student-materials").remove([v.material_path]);
       await load(true);
     },
     onMaterialRemove: async () => {
-      if (!window.confirm(`Remover a apostila da aula "${v.title}"?`)) return;
+      if (!(await askConfirm(`Remover a apostila da aula "${v.title}"?`))) return;
       const { error } = await supabase.from("student_videos").update({ material_path: null, material_name: null }).eq("id", v.id);
-      if (error) { alert("Não consegui remover a apostila: " + error.message); return; }
+      if (error) { notify("Não consegui remover a apostila: " + error.message); return; }
       if (v.material_path) await supabase.storage.from("student-materials").remove([v.material_path]);
       await load(true);
     },
@@ -5225,7 +5994,7 @@ function StudentContentManager() {
                           title="Trocar capa da categoria"
                           onUploaded={async (url) => {
                             const { error } = await supabase.from("student_categories").update({ cover_url: url }).eq("id", cat.id);
-                            if (error) { alert("Não consegui salvar a capa: " + error.message); return; }
+                            if (error) { notify("Não consegui salvar a capa: " + error.message); return; }
                             await load();
                           }}
                         />
@@ -5435,7 +6204,7 @@ function BunnyLinkPanel({ categoryId, moduleId, onDone }) {
       module_id: moduleId || null,
     });
     setBusyGuid(null);
-    if (errorMsg) { alert("Não consegui adicionar a aula: " + errorMsg); return; }
+    if (errorMsg) { notify("Não consegui adicionar a aula: " + errorMsg); return; }
     onDone && onDone();
   };
 
@@ -5632,7 +6401,7 @@ function StudentAccessManager() {
     setSearching(true);
     const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "search-students", query: query.trim() } });
     setSearching(false);
-    if (error) { alert("Não consegui buscar: " + error.message); return; }
+    if (error) { notify("Não consegui buscar: " + error.message); return; }
     setResults(data?.results || []);
   };
 
@@ -5664,7 +6433,7 @@ function StudentAccessManager() {
 
   const confirmPicker = async (userId) => {
     if (!pickerFullAccess && pickerSelectedIds.length === 0) {
-      alert("Marque \"Acesso completo\" ou escolha pelo menos uma categoria.");
+      notify("Marque \"Acesso completo\" ou escolha pelo menos uma categoria.");
       return;
     }
     setBusyId(userId);
@@ -5672,18 +6441,18 @@ function StudentAccessManager() {
       body: { action: "grant-access", userId, categoryIds: pickerFullAccess ? [] : pickerSelectedIds },
     });
     setBusyId(null);
-    if (error || data?.error) { alert("Não consegui liberar o acesso: " + (data?.error || error.message)); return; }
+    if (error || data?.error) { notify("Não consegui liberar o acesso: " + (data?.error || error.message)); return; }
     closePicker();
     await loadGranted();
     setResults((r) => r.map((u) => (u.id === userId ? { ...u, hasAccess: true } : u)));
   };
 
   const handleRevoke = async (userId) => {
-    if (!window.confirm("Remover TODO o acesso desse aluno ao Painel do Aluno (inclusive as categorias liberadas)?")) return;
+    if (!(await askConfirm("Remover TODO o acesso desse aluno ao Painel do Aluno (inclusive as categorias liberadas)?"))) return;
     setBusyId(userId);
     const { data, error } = await supabase.functions.invoke("bunny-stream", { body: { action: "revoke-access", userId } });
     setBusyId(null);
-    if (error || data?.error) { alert("Não consegui remover o acesso: " + (data?.error || error.message)); return; }
+    if (error || data?.error) { notify("Não consegui remover o acesso: " + (data?.error || error.message)); return; }
     if (pickerUserId === userId) closePicker();
     await loadGranted();
     setResults((r) => r.map((u) => (u.id === userId ? { ...u, hasAccess: false } : u)));
@@ -6513,4 +7282,52 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
   .tf-category-header .tf-ranking-actions{ margin-left:50px; }
   .tf-category-cover-preview{ width:34px; height:34px; }
 }
+
+/* ---- avisos e confirmações do app ---- */
+.tf-toast-stack{position:fixed;right:18px;bottom:18px;z-index:400;display:flex;flex-direction:column;gap:8px;max-width:min(380px,calc(100vw - 36px));pointer-events:none;}
+.tf-toast{pointer-events:auto;display:flex;align-items:flex-start;gap:10px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:10px;padding:11px 12px 11px 14px;font-size:13px;line-height:1.45;box-shadow:0 8px 26px rgba(0,0,0,.35);}
+.tf-toast span{flex:1;}
+.tf-toast-error{border-left-color:var(--coral);}
+.tf-toast button{background:transparent;border:none;color:var(--muted);cursor:pointer;padding:2px;display:flex;}
+.tf-confirm-overlay{z-index:300;}
+.tf-confirm-modal{max-width:420px;}
+.tf-confirm-text{margin:0 0 18px;font-size:14px;line-height:1.55;color:var(--text);}
+.tf-confirm-actions{display:flex;justify-content:flex-end;gap:10px;}
+.tf-btn-danger-solid{background:var(--coral) !important;color:#fff !important;}
+
+/* ---- recursos novos ---- */
+.tf-more-details{border:1px dashed var(--border);border-radius:10px;padding:10px 12px;}
+.tf-more-details summary{cursor:pointer;font-size:12.5px;color:var(--muted);font-weight:600;}
+.tf-more-details[open] summary{color:var(--text);}
+.tf-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;}
+.tf-chip{background:var(--surface-2);border:1px solid var(--border);color:var(--muted);font-size:11px;padding:2px 8px;border-radius:20px;}
+.tf-btn-small{padding:6px 11px !important;font-size:12px !important;}
+.tf-guard-card{margin-bottom:16px;}
+.tf-guard-stop{border-color:var(--coral);} .tf-guard-goal{border-color:var(--lime);}
+.tf-guard-alert{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;font-weight:600;}
+.tf-guard-top{display:flex;flex-wrap:wrap;gap:18px 32px;align-items:flex-end;justify-content:space-between;}
+.tf-guard-value{font-size:26px;font-weight:600;margin:2px 0;}
+.tf-guard-bars{flex:1 1 260px;display:flex;flex-direction:column;gap:12px;max-width:420px;}
+.tf-guard-bar-label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:5px;}
+.tf-progress{height:8px;background:var(--surface-2);border-radius:20px;overflow:hidden;}
+.tf-progress-fill{height:100%;border-radius:20px;transition:width .3s;}
+.tf-progress-fill.fill-lime{background:var(--lime);} .tf-progress-fill.fill-coral{background:var(--coral);}
+.tf-inline-field{min-width:0;}
+.tf-metrics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+.tf-metric{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:11px 12px;display:flex;flex-direction:column;gap:3px;}
+.tf-metric-label{font-size:11.5px;color:var(--muted);}
+.tf-metric-value{font-size:16px;font-weight:600;}
+.tf-metric-sub{font-size:11px;color:var(--muted);}
+.tf-week-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.tf-week-grid div{display:flex;flex-direction:column;gap:2px;} .tf-week-grid .tf-muted{font-size:12px;} .tf-week-grid b{font-size:16px;}
+.tf-insights{margin:14px 0 0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--text);}
+.tf-steps-card{margin-bottom:16px;}
+.tf-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;}
+.tf-steps li{display:flex;align-items:center;gap:12px;font-size:13.5px;}
+.tf-steps li.done{color:var(--muted);text-decoration:line-through;}
+.tf-step-check{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff;}
+.tf-steps li.done .tf-step-check{background:var(--lime);border-color:var(--lime);}
+.tf-step-body{flex:1;display:flex;flex-direction:column;gap:2px;}
+
+.tf-offline-bar{position:fixed;left:0;right:0;top:0;z-index:500;background:var(--coral);color:#fff;text-align:center;font-size:12.5px;font-weight:600;padding:7px 12px;}
 `;
