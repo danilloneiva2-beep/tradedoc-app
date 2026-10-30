@@ -19,7 +19,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, ChevronUp, Trophy,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, ChevronUp, CircleHelp, Trophy,
   PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2, Paperclip, FileText, Download, Link2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -459,9 +459,170 @@ function StatCard({ icon: Icon, label, value, sub, tone }) {
 
 const MENTOR_OWNER_EMAIL = "prosolucoeseducacionais@gmail.com";
 
+/* --------------------------- Tutorial guiado (tour) --------------------------- */
+
+const TOUR_STEPS = [
+  {
+    view: "dashboard",
+    title: "Bem-vindo à Tradefy",
+    text: "Em menos de 1 minuto você vai ver onde cadastrar sua conta, como trazer seus trades, como controlar sua disciplina e como ler seus resultados.\nVocê pode pular a qualquer momento e rever depois em \"Ver tutorial\", no menu.",
+  },
+  {
+    view: "accounts",
+    target: "nav-accounts",
+    title: "1º passo: crie sua conta",
+    text: "Cadastre sua conta de trading (Real ou Prop Firm) com o saldo inicial. Todo trade fica ligado a uma conta, então comece por aqui.",
+  },
+  {
+    view: "dashboard",
+    target: "dash-actions",
+    title: "Traga seus trades",
+    text: "Você tem dois caminhos. \"Importar relatório\": envie o arquivo do MetaTrader 5 ou do ProfitPro e a Tradefy preenche o calendário, o resumo da semana e o resultado por horário sozinha.\n\"Novo trade\": lance uma operação manualmente, com humor e anotações.",
+  },
+  {
+    view: "dashboard",
+    target: "dash-guard",
+    title: "Disciplina do dia",
+    text: "Defina sua meta e seu limite de perda do dia. A Tradefy acompanha seu resultado em tempo real e avisa quando você bate a meta ou chega no stop. Proteger o capital vem antes de ganhar.",
+  },
+  {
+    view: "dashboard",
+    target: "dash-period",
+    title: "Escolha o período",
+    text: "Alterne entre Mês atual, 3 meses, 6 meses, Ano e Tudo. Win rate, resultado, drawdown, fator de lucro e a curva de capital acompanham o período escolhido. Mais abaixo ficam o resumo da semana, o resultado por horário e as métricas avançadas.",
+  },
+  {
+    view: "calendar",
+    target: "cal-main",
+    title: "Seu calendário",
+    text: "Cada dia mostra o resultado, e a coluna da direita soma cada semana. Clique num dia para ver, editar ou apagar os trades dele no painel ao lado. Defina também a meta do mês e acompanhe a projeção.",
+  },
+  {
+    view: "mindset",
+    target: "nav-mindset",
+    title: "Entenda seu comportamento",
+    text: "Em \"Mente de Trader\" a Tradefy cruza seu humor com os resultados e mostra o que está custando dinheiro.\nEm \"Ferramentas\" ficam o gerenciador de risco, o cálculo de impostos e o mapa macro. O botão \"Relatório\", no Dashboard, gera seu relatório em PDF.\nPara rever este tour, use \"Ver tutorial\" no menu.",
+  },
+];
+
+function TourOverlay({ active, setActive, setMobileNavOpen, onFinish }) {
+  const [idx, setIdx] = useState(0);
+  const [rect, setRect] = useState(null);
+  const [cardH, setCardH] = useState(250);
+  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const cardRef = useRef(null);
+  const step = TOUR_STEPS[idx];
+  const isLast = idx === TOUR_STEPS.length - 1;
+  const isMobile = vp.w <= 860;
+
+  const finish = () => { setMobileNavOpen(false); onFinish(); };
+  const next = () => (isLast ? finish() : setIdx((i) => i + 1));
+  const prev = () => setIdx((i) => Math.max(0, i - 1));
+
+  // Troca de tela quando o passo pede e, no celular, abre o menu nos passos do menu lateral
+  useEffect(() => {
+    if (step.view && step.view !== active) setActive(step.view);
+    setMobileNavOpen(!!step.target && step.target.startsWith("nav-") && window.innerWidth <= 860);
+  }, [idx]);
+
+  // Procura o elemento destacado (espera a tela trocar) e acompanha se ele mudar de lugar
+  useEffect(() => {
+    setRect(null);
+    if (!step.target) return undefined;
+    let tries = 0;
+    let scrolled = false;
+    const tick = () => {
+      tries += 1;
+      const el = document.querySelector(`[data-tour="${step.target}"]`);
+      if (el) {
+        const r0 = el.getBoundingClientRect();
+        if (r0.width > 4 && r0.height > 4) {
+          if (!scrolled) { scrolled = true; el.scrollIntoView({ block: "center", inline: "nearest" }); }
+          const r = el.getBoundingClientRect();
+          const visible = r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight;
+          if (visible) {
+            setRect((p) => (p && Math.abs(p.x - r.left) < 1 && Math.abs(p.y - r.top) < 1 && Math.abs(p.w - r.width) < 1 && Math.abs(p.h - r.height) < 1
+              ? p : { x: r.left, y: r.top, w: r.width, h: r.height }));
+            return;
+          }
+        }
+      }
+      if (tries > 12) setRect(null); // não achou (ou está escondido): mostra o cartão no centro
+    };
+    tick();
+    const t = setInterval(tick, 250);
+    return () => clearInterval(t);
+  }, [idx]);
+
+  useEffect(() => {
+    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Teclado: setas e Enter navegam, Esc fecha
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); finish(); }
+      else if (e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); e.stopPropagation(); next(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); prev(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+
+  useEffect(() => {
+    if (cardRef.current) setCardH(cardRef.current.offsetHeight);
+  }, [idx, rect, vp.w]);
+
+  const cardW = Math.min(380, vp.w - 32);
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  const gap = 16;
+  let pos;
+  if (!rect) {
+    pos = { left: (vp.w - cardW) / 2, top: Math.max(16, (vp.h - cardH) / 2) };
+  } else if (isMobile) {
+    pos = { left: 16, top: rect.y + rect.h / 2 < vp.h / 2 ? vp.h - cardH - 16 : 16 };
+  } else {
+    const below = vp.h - (rect.y + rect.h) - gap - 16;
+    const above = rect.y - gap - 16;
+    const right = vp.w - (rect.x + rect.w) - gap - 16;
+    if (rect.x < 320 && right >= cardW) pos = { left: rect.x + rect.w + gap, top: clamp(rect.y, 16, vp.h - cardH - 16) };
+    else if (below >= cardH) pos = { left: clamp(rect.x + rect.w / 2 - cardW / 2, 16, vp.w - cardW - 16), top: rect.y + rect.h + gap };
+    else if (above >= cardH) pos = { left: clamp(rect.x + rect.w / 2 - cardW / 2, 16, vp.w - cardW - 16), top: rect.y - gap - cardH };
+    else if (right >= cardW) pos = { left: rect.x + rect.w + gap, top: clamp(rect.y, 16, vp.h - cardH - 16) };
+    else pos = { left: vp.w - cardW - 16, top: vp.h - cardH - 16 };
+  }
+  const pad = 6;
+
+  return (
+    <>
+      <div className="tf-tour-block" style={rect ? undefined : { background: "rgba(5,8,16,0.74)" }} />
+      {rect && (
+        <div className="tf-tour-hole" style={{ left: rect.x - pad, top: rect.y - pad, width: rect.w + pad * 2, height: rect.h + pad * 2 }} />
+      )}
+      <div className="tf-tour-card" ref={cardRef} role="dialog" aria-modal="true" aria-labelledby="tf-tour-title" style={{ left: pos.left, top: pos.top, width: cardW }}>
+        <div className="tf-tour-meta">
+          <span>Passo {idx + 1} de {TOUR_STEPS.length}</span>
+          <button type="button" className="tf-tour-skip" onClick={finish}>Pular tour</button>
+        </div>
+        <div className="tf-tour-prog"><div style={{ width: `${((idx + 1) / TOUR_STEPS.length) * 100}%` }} /></div>
+        <div className="tf-tour-title" id="tf-tour-title">{step.title}</div>
+        <div className="tf-tour-text">
+          {step.text.split("\n").map((line, i) => <p key={i} style={{ margin: i ? "8px 0 0" : 0 }}>{line}</p>)}
+        </div>
+        <div className="tf-tour-actions">
+          {idx > 0 ? <button type="button" className="tf-btn-outline" onClick={prev}>Voltar</button> : <span />}
+          <button type="button" className="tf-btn-primary" onClick={next} autoFocus>{isLast ? "Concluir" : idx === 0 ? "Começar" : "Próximo"}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // Quem vê a aba "Mentores" (beta) não é mais uma lista fixa aqui no código —
 // é a coluna profiles.is_mentor_beta, controlada pelo banco de dados.
-function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, hasStudentPanelAccess, isMentorBetaTester }) {
+function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, hasStudentPanelAccess, isMentorBetaTester, onStartTour }) {
   const isOwnerAccount = (userEmail || "").toLowerCase() === MENTOR_OWNER_EMAIL;
 
   const items = [
@@ -498,13 +659,18 @@ function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, 
         </div>
         <nav className="tf-nav">
           {items.map((it) => (
-            <button key={it.id} onClick={() => handleSelect(it.id)} className={`tf-nav-item ${active === it.id ? "active" : ""}`}>
+            <button key={it.id} data-tour={`nav-${it.id}`} onClick={() => handleSelect(it.id)} className={`tf-nav-item ${active === it.id ? "active" : ""}`}>
               <it.icon size={17} /><span>{it.label}</span>
               {it.badge && <span className="tf-nav-badge">{it.badge}</span>}
             </button>
           ))}
         </nav>
         <div className="tf-sidebar-footer">
+          {onStartTour && (
+            <button type="button" className="tf-nav-item tf-tour-link" onClick={() => { onClose && onClose(); onStartTour(); }}>
+              <CircleHelp size={17} /><span>Ver tutorial</span>
+            </button>
+          )}
           {userName && (
             <button className="tf-user-chip" onClick={() => handleSelect("profile")}>
               <span className="tf-user-avatar">{userName.charAt(0).toUpperCase()}</span>
@@ -1281,7 +1447,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
     <div className="tf-view">
       <div className="tf-view-header">
         <div><h1>Visão geral</h1><p className="tf-muted">Sua performance consolidada</p></div>
-        <div className="tf-view-header-actions">
+        <div className="tf-view-header-actions" data-tour="dash-actions">
           <AccountFilterDropdown accounts={accounts} selected={accountFilter} onChange={setAccountFilter} />
           <button className="tf-btn-outline" onClick={onOpenImport}><FileSpreadsheet size={15} /> Importar relatório</button>
           {onOpenReport && <button className="tf-btn-outline" onClick={onOpenReport}><Download size={15} /> Relatório</button>}
@@ -1290,7 +1456,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
       </div>
 
       {onChangePeriod && (
-        <div className="tf-period-bar">
+        <div className="tf-period-bar" data-tour="dash-period">
           <div className="tf-toggle-group" role="group" aria-label="Período dos resultados">
             {PERIOD_OPTIONS.map((o) => (
               <button key={o.key} type="button" className={period === o.key ? "active" : ""} onClick={() => onChangePeriod(o.key)}>{o.label}</button>
@@ -1303,10 +1469,12 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
       <GettingStartedCard data={{ rawTrades: allTrades || data.rawTrades }} hasLimits={Number(dailyGoal) > 0 || Number(dailyStop) > 0} onOpenModal={onOpenModal} onOpenImport={onOpenImport} />
 
       {onSaveDailyLimits && (
-        <DailyGuardCard
-          todayPnl={todayStats.pnl} todayCount={todayStats.count}
-          goal={dailyGoal} stop={dailyStop} onSave={onSaveDailyLimits}
-        />
+        <div data-tour="dash-guard">
+          <DailyGuardCard
+            todayPnl={todayStats.pnl} todayCount={todayStats.count}
+            goal={dailyGoal} stop={dailyStop} onSave={onSaveDailyLimits}
+          />
+        </div>
       )}
 
       <div className="tf-stats-grid">
@@ -1706,7 +1874,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
 
       <div className="tf-cal-layout">
         <div className="tf-cal-main">
-        <div className="tf-card">
+        <div className="tf-card" data-tour="cal-main">
           <div className="tf-card-head tf-cal-card-head">
             <h3>{MONTH_LABELS[month]} <span className={`tf-num ${monthTotal >= 0 ? "cal-up" : "cal-down"}`} style={{ marginLeft: 10 }}>{fmtBRL(monthTotal)}</span></h3>
             <div className="tf-cal-mode">
@@ -4544,6 +4712,7 @@ function AppInner() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showTour, setShowTour] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [accountFilter, setAccountFilter] = useState([]); // [] = todas as contas
   const [period, setPeriodState] = useState(() => {
@@ -4867,6 +5036,24 @@ function AppInner() {
     await loadUserData();
   };
 
+  // Tutorial: abre sozinho no primeiro acesso (quem ainda não tem nenhum trade) e só uma vez por usuário
+  const tourKey = session?.user?.id ? `tradefy-tour-done-${session.user.id}` : null;
+  const finishTour = () => {
+    setShowTour(false);
+    setMobileNavOpen(false);
+    setActive("dashboard");
+    if (tourKey) { try { localStorage.setItem(tourKey, "1"); } catch (e) { /* ok */ } }
+  };
+  const startTour = () => { setActive("dashboard"); setShowTour(true); };
+  useEffect(() => {
+    if (!tourKey || !profile || subscription?.status !== "active" || loadingUserData || trades.length > 0) return undefined;
+    let done = false;
+    try { done = localStorage.getItem(tourKey) === "1"; } catch (e) { /* ok */ }
+    if (done) return undefined;
+    const t = setTimeout(() => setShowTour(true), 900);
+    return () => clearTimeout(t);
+  }, [tourKey, profile, subscription, loadingUserData, trades.length]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setActive("dashboard");
@@ -4957,8 +5144,10 @@ function AppInner() {
             onClose={() => setMobileNavOpen(false)}
             hasStudentPanelAccess={hasStudentPanelAccess}
             isMentorBetaTester={isMentorBetaTester}
+            onStartTour={startTour}
           />
           <ErrorBoundary resetKey={active}>{view}</ErrorBoundary>
+          {showTour && <TourOverlay active={active} setActive={setActive} setMobileNavOpen={setMobileNavOpen} onFinish={finishTour} />}
           {showModal && <NewTradeModal onClose={() => setShowModal(false)} onSubmit={handleNewTrade} accounts={accounts} />}
           {showShareModal && canShareWithMentor && <ShareWithMentorModal session={session} accounts={accounts} trades={trades} onClose={() => setShowShareModal(false)} />}
           {showReportModal && (
@@ -6966,6 +7155,18 @@ const APP_STYLES = `
 .tf-propdesk-features li svg{flex-shrink:0; margin-top:2px;}
 .tf-nav-item:hover{background:var(--surface-2);color:var(--text);} .tf-nav-item.active{background:var(--blue-dim);color:#C9DAFF;}
 .tf-sidebar-footer{border-top:1px solid var(--border);padding-top:14px;}
+.tf-tour-link{width:100%;margin-bottom:8px;}
+.tf-tour-block{position:fixed;inset:0;z-index:9990;}
+.tf-tour-hole{position:fixed;z-index:9991;border-radius:12px;box-shadow:0 0 0 9999px rgba(5,8,16,0.74);border:2px solid var(--blue);pointer-events:none;transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease;}
+.tf-tour-card{position:fixed;z-index:9992;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,0.5);color:var(--text);box-sizing:border-box;}
+.tf-tour-meta{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;}
+.tf-tour-skip{background:none;border:0;color:var(--muted);cursor:pointer;font:inherit;text-transform:inherit;letter-spacing:inherit;padding:0;}
+.tf-tour-skip:hover{color:var(--text);}
+.tf-tour-prog{height:4px;background:var(--surface-2);border-radius:4px;margin-bottom:14px;overflow:hidden;}
+.tf-tour-prog div{height:100%;background:var(--blue);border-radius:4px;transition:width .25s ease;}
+.tf-tour-title{font-size:16px;font-weight:700;margin-bottom:6px;}
+.tf-tour-text{font-size:13px;color:var(--muted);line-height:1.55;margin-bottom:16px;}
+.tf-tour-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;}
 .tf-user-chip{display:flex;align-items:center;gap:8px;padding:6px 4px;background:none;border:none;cursor:pointer;width:100%;border-radius:7px;text-align:left;}
 .tf-user-chip:hover{background:var(--surface-2);}
 .tf-user-avatar{width:24px;height:24px;border-radius:50%;background:var(--blue-dim);color:#C9DAFF;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
@@ -7492,7 +7693,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
     width:30px; height:30px; border-radius:8px; background:var(--surface-2);
     border:1px solid var(--border); color:var(--text); cursor:pointer;
   }
-  .tf-sidebar-footer{ display:flex; }
+  .tf-sidebar-footer{ display:flex; flex-direction:column; }
 
   /* Content takes the full width; no permanent offset since the drawer overlays */
   .tf-view{ padding:20px 16px 24px; }
