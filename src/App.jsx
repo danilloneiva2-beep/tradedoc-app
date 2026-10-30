@@ -212,6 +212,37 @@ function useDerivedData(trades, accounts) {
 
 /* ------------------- Resumos, exportação e relatório -------------------- */
 
+const PERIOD_OPTIONS = [
+  { key: "month", label: "Mês atual" },
+  { key: "3m", label: "3 meses" },
+  { key: "6m", label: "6 meses" },
+  { key: "year", label: "Ano" },
+  { key: "all", label: "Tudo" },
+];
+
+// Data de início de cada período (meses fechados no calendário, até hoje)
+function periodStart(period) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  if (period === "month") return localDateStr(new Date(y, m, 1));
+  if (period === "3m") return localDateStr(new Date(y, m - 2, 1));
+  if (period === "6m") return localDateStr(new Date(y, m - 5, 1));
+  if (period === "year") return localDateStr(new Date(y, 0, 1));
+  return null;
+}
+
+function periodLabel(period) {
+  const start = periodStart(period);
+  if (!start) return "Todo o histórico";
+  if (period === "month") {
+    const d = new Date();
+    const txt = d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    return txt.charAt(0).toUpperCase() + txt.slice(1);
+  }
+  return `${start.slice(8, 10)}/${start.slice(5, 7)}/${start.slice(0, 4)} até hoje`;
+}
+
 function summarizeTrades(list) {
   const pnls = list.map((t) => Number(t.pnl));
   const wins = pnls.filter((v) => v > 0);
@@ -1239,13 +1270,13 @@ function GettingStartedCard({ data, hasLimits, onOpenModal, onOpenImport }) {
   );
 }
 
-function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter, canShareWithMentor, onShareWithMentor, dailyGoal, dailyStop, onSaveDailyLimits, onOpenReport }) {
+function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter, canShareWithMentor, onShareWithMentor, dailyGoal, dailyStop, onSaveDailyLimits, onOpenReport, period = "all", onChangePeriod, allTrades }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
   const todayStats = useMemo(() => {
     const today = localDateStr();
-    const list = data.rawTrades.filter((t) => t.trade_date === today);
+    const list = (allTrades || data.rawTrades).filter((t) => t.trade_date === today);
     return { pnl: list.reduce((sum, t) => sum + Number(t.pnl), 0), count: list.length };
-  }, [data.rawTrades]);
+  }, [allTrades, data.rawTrades]);
   return (
     <div className="tf-view">
       <div className="tf-view-header">
@@ -1258,7 +1289,18 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
         </div>
       </div>
 
-      <GettingStartedCard data={data} hasLimits={Number(dailyGoal) > 0 || Number(dailyStop) > 0} onOpenModal={onOpenModal} onOpenImport={onOpenImport} />
+      {onChangePeriod && (
+        <div className="tf-period-bar">
+          <div className="tf-toggle-group" role="group" aria-label="Período dos resultados">
+            {PERIOD_OPTIONS.map((o) => (
+              <button key={o.key} type="button" className={period === o.key ? "active" : ""} onClick={() => onChangePeriod(o.key)}>{o.label}</button>
+            ))}
+          </div>
+          <span className="tf-period-label">{periodLabel(period)} · {data.rawTrades.length} {data.rawTrades.length === 1 ? "operação" : "operações"}</span>
+        </div>
+      )}
+
+      <GettingStartedCard data={{ rawTrades: allTrades || data.rawTrades }} hasLimits={Number(dailyGoal) > 0 || Number(dailyStop) > 0} onOpenModal={onOpenModal} onOpenImport={onOpenImport} />
 
       {onSaveDailyLimits && (
         <DailyGuardCard
@@ -1269,7 +1311,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
 
       <div className="tf-stats-grid">
         <StatCard icon={Target} label="Win rate" value={`${winRate}%`} tone="up" />
-        <StatCard icon={TrendingUp} label="P&L total" value={fmtBRL(totalPnL)} tone={totalPnL >= 0 ? "up" : "down"} />
+        <StatCard icon={TrendingUp} label={period === "all" ? "P&L total" : "P&L do período"} value={fmtBRL(totalPnL)} tone={totalPnL >= 0 ? "up" : "down"} />
         <StatCard icon={ArrowDownRight} label="Drawdown máx." value={`${maxDD.toFixed(1)}%`} tone="down" />
         <StatCard icon={Percent} label="Fator de lucro" value={profitFactor} tone="neutral" />
       </div>
@@ -1297,7 +1339,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
       </div>
 
       <div className="tf-two-col" style={{ marginBottom: 16 }}>
-        <WeeklySummaryCard trades={data.rawTrades} />
+        <WeeklySummaryCard trades={allTrades || data.rawTrades} />
         <div className="tf-card">
           <div className="tf-card-head"><h3>Resultado por horário</h3></div>
           {data.hourPerf.length === 0 ? (
@@ -1339,7 +1381,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
       <div className="tf-card" style={{ marginBottom: 16 }}>
         <div className="tf-card-head"><h3>Performance por dia da semana</h3></div>
         {weekdayPerf.every((w) => w.pnl === 0) ? (
-          <p className="tf-empty">Nenhum trade registrado ainda.</p>
+          <p className="tf-empty">Nenhum trade neste período.</p>
         ) : (
           <div className="tf-weekday-list">
             {weekdayPerf.map((w) => (
@@ -1360,7 +1402,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
           <div className="tf-card-head"><h3>Análise por ativo</h3></div>
           <div className="tf-table">
             <div className="tf-table-row tf-table-head"><span>Ativo</span><span>Trades</span><span>Win rate</span><span>P&L</span></div>
-            {assetPerf.length === 0 && <div className="tf-empty">Nenhum trade registrado ainda.</div>}
+            {assetPerf.length === 0 && <div className="tf-empty">Nenhum trade neste período.</div>}
             {assetPerf.map((a) => (
               <div className="tf-asset-block" key={a.asset}>
                 <div className="tf-table-row">
@@ -1379,7 +1421,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
         <div className="tf-card">
           <div className="tf-card-head"><h3>Trades recentes</h3></div>
           <div className="tf-trade-list">
-            {recentTrades.length === 0 && <div className="tf-empty">Nenhum trade registrado ainda.</div>}
+            {recentTrades.length === 0 && <div className="tf-empty">Nenhum trade neste período.</div>}
             {recentTrades.map((t) => (
               <div className="tf-trade-row tf-trade-row-editable" key={t.id}>
                 <span className={`tf-dot ${t.pnl >= 0 ? "dot-lime" : "dot-coral"}`} />
@@ -4294,6 +4336,13 @@ function AppInner() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [editingTrade, setEditingTrade] = useState(null);
   const [accountFilter, setAccountFilter] = useState([]); // [] = todas as contas
+  const [period, setPeriodState] = useState(() => {
+    try { return localStorage.getItem("tradefy-period") || "month"; } catch (e) { return "month"; }
+  });
+  const setPeriod = (p) => {
+    setPeriodState(p);
+    try { localStorage.setItem("tradefy-period", p); } catch (e) { /* ok */ }
+  };
   const [theme, setTheme] = useState(() => {
     if (typeof window !== "undefined") {
       return window.localStorage.getItem("tradefy-theme") || "dark";
@@ -4423,7 +4472,11 @@ function AppInner() {
   const filteredAccountObjs = accountFilter.length === 0 ? accounts : accounts.filter((a) => accountFilter.includes(a.id));
   const filteredAccountIds = filteredAccountObjs.map((a) => a.id);
   const filteredTrades = accountFilter.length === 0 ? trades : trades.filter((t) => filteredAccountIds.includes(t.account_id));
-  const data = useDerivedData(filteredTrades, filteredAccountObjs);
+  const periodTrades = useMemo(() => {
+    const start = periodStart(period);
+    return start ? filteredTrades.filter((t) => t.trade_date >= start) : filteredTrades;
+  }, [trades, accountFilter, period]); // eslint-disable-line react-hooks/exhaustive-deps
+  const data = useDerivedData(periodTrades, filteredAccountObjs);
 
   const reportError = (error, action) => {
     console.error(action, error);
@@ -4624,6 +4677,9 @@ function AppInner() {
     dailyStop: profile?.daily_stop,
     onSaveDailyLimits: handleSaveDailyLimits,
     onOpenReport: () => setShowReportModal(true),
+    period,
+    onChangePeriod: setPeriod,
+    allTrades: filteredTrades,
   };
 
   const view = (() => {
@@ -7347,4 +7403,9 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-step-body{flex:1;display:flex;flex-direction:column;gap:2px;}
 
 .tf-offline-bar{position:fixed;left:0;right:0;top:0;z-index:500;background:var(--coral);color:#fff;text-align:center;font-size:12.5px;font-weight:600;padding:7px 12px;}
+
+.tf-period-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:0 0 16px;}
+.tf-period-label{font-size:12.5px;color:var(--muted);}
+.tf-period-bar .tf-toggle-group{max-width:100%;overflow-x:auto;}
+.tf-period-bar .tf-toggle-group button{white-space:nowrap;padding:8px 14px;font-size:12.5px;}
 `;
