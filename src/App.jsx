@@ -12,7 +12,7 @@ import {
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
   Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
-  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2, Paperclip, FileText, Download,
+  PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2, Paperclip, FileText, Download, Link2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -393,7 +393,7 @@ function ImportTradesModal({ onClose, onImport, accounts }) {
   };
 
   return (
-    <div className="tf-modal-overlay" onClick={onClose}>
+    <div className="tf-modal-overlay">
       <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="tf-modal-head">
           <h3>Importar operações</h3>
@@ -556,7 +556,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
   };
 
   return (
-    <div className="tf-modal-overlay" onClick={onClose}>
+    <div className="tf-modal-overlay">
       <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="tf-modal-head">
           <h3>{editTrade ? "Editar trade" : "Registrar trade"}</h3>
@@ -859,7 +859,7 @@ function DayDetailModal({ dayTrades, dateLabel, onClose, onAddTrade, onEditTrade
   const [expandedId, setExpandedId] = useState(null);
   const total = dayTrades.reduce((s, t) => s + Number(t.pnl), 0);
   return (
-    <div className="tf-modal-overlay" onClick={onClose}>
+    <div className="tf-modal-overlay">
       <div className="tf-modal" onClick={(e) => e.stopPropagation()}>
         <div className="tf-modal-head">
           <h3>{dateLabel}</h3>
@@ -4170,7 +4170,7 @@ function ShareWithMentorModal({ session, accounts, trades, onClose }) {
   const accountName = (id) => accounts.find((a) => String(a.id) === String(id))?.name || "Conta";
 
   return (
-    <div className="tf-modal-overlay" onClick={onClose}>
+    <div className="tf-modal-overlay">
       <div className="tf-modal tf-modal-wide" onClick={(e) => e.stopPropagation()}>
         <div className="tf-modal-head">
           <h3>Compartilhar com seu mentor</h3>
@@ -4820,7 +4820,7 @@ function VideoPlayerModal({ video, onClose }) {
   }, [video.bunny_video_id]);
 
   return (
-    <div className="tf-modal-overlay" onClick={onClose}>
+    <div className="tf-modal-overlay">
       <div className="tf-modal tf-modal-video" onClick={(e) => e.stopPropagation()}>
         <div className="tf-modal-head">
           <h3>{video.title}</h3>
@@ -4962,6 +4962,7 @@ function StudentContentManager() {
   const [editModName, setEditModName] = useState("");
   const [editModDesc, setEditModDesc] = useState("");
   const [uploadModuleId, setUploadModuleId] = useState(null);
+  const [linkModuleId, setLinkModuleId] = useState(null);
   const [syncInfo, setSyncInfo] = useState({}); // id do vídeo -> detalhe do status vindo do Bunny
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
@@ -5275,7 +5276,8 @@ function StudentContentManager() {
                             <div className="tf-module-header">
                               <span className="tf-module-header-title">{mod.name}</span>
                               <div className="tf-ranking-actions">
-                                <button type="button" className="tf-row-action" onClick={() => setUploadModuleId(uploadModuleId === mod.id ? null : mod.id)} title="Adicionar aula"><Upload size={13} /></button>
+                                <button type="button" className="tf-row-action" onClick={() => { setLinkModuleId(linkModuleId === mod.id ? null : mod.id); setUploadModuleId(null); }} title="Adicionar aula já enviada ao Bunny (recomendado para vídeos grandes)"><Link2 size={13} /></button>
+                                <button type="button" className="tf-row-action" onClick={() => { setUploadModuleId(uploadModuleId === mod.id ? null : mod.id); setLinkModuleId(null); }} title="Enviar vídeo por aqui"><Upload size={13} /></button>
                                 <button type="button" className="tf-row-action" onClick={() => startEditModule(mod)} title="Editar"><Pencil size={13} /></button>
                                 <button type="button" className="tf-row-action tf-row-action-danger" onClick={() => handleDeleteModule(mod)} title="Apagar"><Trash2 size={13} /></button>
                               </div>
@@ -5286,13 +5288,16 @@ function StudentContentManager() {
                           {uploadModuleId === mod.id && (
                             <VideoUploadForm categoryId={cat.id} moduleId={mod.id} onDone={() => { setUploadModuleId(null); load(); }} />
                           )}
+                          {linkModuleId === mod.id && (
+                            <BunnyLinkPanel categoryId={cat.id} moduleId={mod.id} onDone={() => { setLinkModuleId(null); load().then(() => refreshStatuses()); }} />
+                          )}
 
                           {modVideos.length > 0 && (
                             <div className="tf-trade-list" style={{ marginTop: 10 }}>
                               {modVideos.map((v) => <VideoAdminRow key={v.id} {...videoRowProps(v)} />)}
                             </div>
                           )}
-                          {modVideos.length === 0 && uploadModuleId !== mod.id && (
+                          {modVideos.length === 0 && uploadModuleId !== mod.id && linkModuleId !== mod.id && (
                             <p className="tf-module-empty">Nenhuma aula nesse módulo ainda.</p>
                           )}
                         </div>
@@ -5344,8 +5349,8 @@ function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDe
             ? (syncInfo?.reason === "not_found"
                 ? "Esse vídeo não existe mais no Bunny (provavelmente ficou na biblioteca antiga). Apague a aula e envie de novo."
                 : "O Bunny avisou erro ao processar esse vídeo. Apague a aula e envie de novo.")
-            : video.status === "processing" && syncInfo?.bunnyStatus === 0
-              ? "O Bunny criou o vídeo mas ainda não recebeu o arquivo. Se o envio foi interrompido, apague a aula e envie de novo."
+            : video.status === "processing" && (syncInfo?.noFile || syncInfo?.bunnyStatus === 0)
+              ? "O Bunny criou o vídeo mas o arquivo nunca chegou (0 bytes). O envio foi interrompido: apague essa aula e envie de novo, sem fechar a página até aparecer \"Upload concluído\"."
               : undefined
         }
       >
@@ -5353,7 +5358,7 @@ function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDe
           ? "Pronto"
           : video.status === "error"
             ? "Erro"
-            : syncInfo?.bunnyStatus === 0
+            : (syncInfo?.noFile || syncInfo?.bunnyStatus === 0)
               ? "Sem arquivo"
               : syncInfo?.encodeProgress > 0
                 ? `Processando ${syncInfo.encodeProgress}%`
@@ -5367,6 +5372,122 @@ function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDe
   );
 }
 
+// Chama a função bunny-stream e devolve { data, errorMsg } com a mensagem de erro real
+async function callBunnyFunction(body) {
+  try {
+    const { data, error } = await supabase.functions.invoke("bunny-stream", { body });
+    if (error || data?.error) {
+      let detail = data?.error || error?.message || "erro desconhecido";
+      if (!data?.error && error?.context && typeof error.context.json === "function") {
+        try {
+          const b = await error.context.json();
+          if (b?.error) detail = b.error;
+        } catch (_) { /* mantém a mensagem genérica */ }
+      }
+      return { data: null, errorMsg: detail };
+    }
+    return { data, errorMsg: "" };
+  } catch (e) {
+    return { data: null, errorMsg: e?.message || "falha de conexão" };
+  }
+}
+
+function fmtVideoDuration(seconds) {
+  const t = Math.max(0, Math.round(Number(seconds) || 0));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = t % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function fmtVideoSize(bytes) {
+  const b = Number(bytes) || 0;
+  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`;
+  if (b >= 1024 ** 2) return `${Math.round(b / 1024 ** 2)} MB`;
+  return `${Math.round(b / 1024)} KB`;
+}
+
+// Jeito mais seguro de subir vídeos grandes: o dono envia o vídeo pelo painel do
+// Bunny ("Add Media") e aqui só escolhe o vídeo que já está lá pra virar aula.
+function BunnyLinkPanel({ categoryId, moduleId, onDone }) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState("");
+  const [titles, setTitles] = useState({});
+  const [busyGuid, setBusyGuid] = useState(null);
+
+  const loadItems = async () => {
+    setItems(null);
+    setError("");
+    const { data, errorMsg } = await callBunnyFunction({ action: "list-library-videos" });
+    if (errorMsg) { setError(errorMsg); setItems([]); return; }
+    setItems(data?.videos || []);
+  };
+
+  useEffect(() => { loadItems(); }, []);
+
+  const handleLink = async (v) => {
+    setBusyGuid(v.guid);
+    const { errorMsg } = await callBunnyFunction({
+      action: "link-video",
+      guid: v.guid,
+      title: (titles[v.guid] ?? v.title ?? "").trim(),
+      category_id: categoryId,
+      module_id: moduleId || null,
+    });
+    setBusyGuid(null);
+    if (errorMsg) { alert("Não consegui adicionar a aula: " + errorMsg); return; }
+    onDone && onDone();
+  };
+
+  return (
+    <div className="tf-link-panel">
+      <p className="tf-muted" style={{ fontSize: 12.5, margin: "0 0 10px", lineHeight: 1.5 }}>
+        Para vídeos grandes, envie o arquivo pelo painel do Bunny (Stream, sua biblioteca, <b>Add Media</b>) e depois escolha aqui o vídeo que já está lá.
+      </p>
+      {items === null ? (
+        <p className="tf-muted" style={{ fontSize: 12.5 }}>Buscando vídeos no Bunny...</p>
+      ) : error ? (
+        <div className="tf-share-error">Não consegui listar os vídeos do Bunny: {error}</div>
+      ) : items.length === 0 ? (
+        <p className="tf-muted" style={{ fontSize: 12.5 }}>Nenhum vídeo novo encontrado na biblioteca do Bunny. Envie pelo Bunny e clique em atualizar.</p>
+      ) : (
+        <div className="tf-link-list">
+          {items.map((v) => {
+            const noFile = !v.storageSize && !v.length && v.status <= 2;
+            const label = noFile
+              ? "Sem arquivo"
+              : v.internalStatus === "ready"
+                ? "Pronto"
+                : v.internalStatus === "error"
+                  ? "Erro"
+                  : `Convertendo${v.encodeProgress ? " " + v.encodeProgress + "%" : ""}`;
+            return (
+              <div className="tf-link-row" key={v.guid}>
+                <input
+                  value={titles[v.guid] ?? v.title ?? ""}
+                  onChange={(e) => setTitles((prev) => ({ ...prev, [v.guid]: e.target.value }))}
+                  placeholder="Título da aula"
+                />
+                <span className="tf-muted tf-link-meta">{noFile ? "0 MB" : `${fmtVideoDuration(v.length)} · ${fmtVideoSize(v.storageSize)}`}</span>
+                <span className={`tf-nav-badge ${noFile || v.internalStatus === "error" ? "tf-badge-error" : ""}`}>{label}</span>
+                <button
+                  type="button"
+                  className="tf-btn-primary"
+                  disabled={noFile || v.internalStatus === "error" || busyGuid === v.guid}
+                  onClick={() => handleLink(v)}
+                >
+                  {busyGuid === v.guid ? "Adicionando..." : "Adicionar aqui"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <button type="button" className="tf-btn-outline" style={{ marginTop: 10 }} onClick={loadItems}><RefreshCw size={13} /> Atualizar lista</button>
+    </div>
+  );
+}
+
 function VideoUploadForm({ categoryId, moduleId, onDone }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -5374,6 +5495,14 @@ function VideoUploadForm({ categoryId, moduleId, onDone }) {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("idle"); // idle | creating | uploading | done | error
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Enquanto o vídeo está subindo, avisa antes de fechar/recarregar a página
+  useEffect(() => {
+    if (status !== "uploading") return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [status]);
 
   const handleFile = (e) => {
     const f = e.target.files?.[0];
@@ -5385,6 +5514,7 @@ function VideoUploadForm({ categoryId, moduleId, onDone }) {
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!file || !title.trim()) return;
+    if (file.size === 0) { setErrorMsg("O arquivo escolhido está vazio (0 bytes). Escolha o vídeo de novo."); setStatus("error"); return; }
     setStatus("creating");
     setErrorMsg("");
     try {
@@ -5410,7 +5540,7 @@ function VideoUploadForm({ categoryId, moduleId, onDone }) {
       await new Promise((resolve, reject) => {
         const upload = new tus.Upload(file, {
           endpoint: BUNNY_TUS_ENDPOINT,
-          retryDelays: [0, 3000, 5000, 10000, 20000],
+          retryDelays: [0, 3000, 5000, 10000, 20000, 60000, 60000],
           headers: {
             AuthorizationSignature: authorizationSignature,
             AuthorizationExpire: String(authorizationExpire),
@@ -6350,6 +6480,12 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-module-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .tf-module-header-title{ font-size:13px; font-weight:700; }
 .tf-module-empty{ font-size:12.5px; color:var(--muted); margin:8px 0 0; }
+.tf-link-panel{ margin-top:12px; padding:12px; background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+.tf-link-list{ display:flex; flex-direction:column; gap:8px; }
+.tf-link-row{ display:grid; grid-template-columns:1fr auto auto auto; gap:10px; align-items:center; }
+.tf-link-row input{ background:var(--surface-2); border:1px solid var(--border); color:var(--text); padding:8px 10px; border-radius:8px; font-size:13px; outline:none; width:100%; min-width:0; }
+.tf-link-meta{ font-size:11.5px; white-space:nowrap; }
+@media (max-width:700px){ .tf-link-row{ grid-template-columns:1fr 1fr; } .tf-link-row input{ grid-column:1 / -1; } }
 
 /* Tablet e celular grande */
 @media (max-width: 900px) {
