@@ -19,7 +19,7 @@ import {
   ArrowUpRight, ArrowDownRight, Percent, Target, ChevronLeft, ChevronRight,
   Flame, ShieldCheck, Check, Plus, Building2, X, Mail, Lock, User, ArrowRight, Menu,
   Pencil, Trash2, Filter, Sun, Moon, Newspaper, AlertCircle, RefreshCw,
-  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, Trophy,
+  Hash, Scale, TrendingDown, Globe, Loader2, Upload, FileSpreadsheet, Brain, AlertTriangle, Rocket, Users, Send, ChevronDown, ChevronUp, Trophy,
   PlayCircle, Search, FolderPlus, UserPlus, UserMinus, Image as ImageIcon, BarChart3, Share2, Paperclip, FileText, Download, Link2,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
@@ -5836,6 +5836,58 @@ function StudentContentManager() {
     load().then(() => refreshStatuses());
   }, []);
 
+  // ---- Ordem das categorias, módulos e aulas ----
+  // Grava a ordem 1, 2, 3... de uma lista de itens (só atualiza quem mudou de posição).
+  const saveOrder = async (table, list) => {
+    const results = await Promise.all(
+      list.map((item, i) => (item.position === i + 1
+        ? Promise.resolve({ error: null })
+        : supabase.from(table).update({ position: i + 1 }).eq("id", item.id)))
+    );
+    return results.find((r) => r.error)?.error || null;
+  };
+
+  // Troca o item de lugar com o vizinho (dir = -1 sobe, +1 desce) dentro da lista de "irmãos".
+  const moveItem = async (table, siblings, id, dir) => {
+    const idx = siblings.findIndex((x) => x.id === id);
+    const to = idx + dir;
+    if (idx < 0 || to < 0 || to >= siblings.length) return;
+    const next = siblings.slice();
+    [next[idx], next[to]] = [next[to], next[idx]];
+    const err = await saveOrder(table, next);
+    if (err) notify("Não consegui mudar a ordem: " + err.message);
+    await load(true);
+  };
+
+  const moveCategory = (id, dir) => moveItem("student_categories", categories, id, dir);
+  const moveModule = (mod, dir) => moveItem("student_modules", modules.filter((m) => m.category_id === mod.category_id), mod.id, dir);
+  const moveVideo = (v, dir) => moveItem(
+    "student_videos",
+    videos.filter((x) => (v.module_id ? x.module_id === v.module_id : (!x.module_id && x.category_id === v.category_id))),
+    v.id,
+    dir
+  );
+
+  // Aula nova entra com posição 0: depois que a ordem já foi mexida, manda ela pro fim da lista.
+  useEffect(() => {
+    if (loading || videos.length === 0) return;
+    const groups = {};
+    videos.forEach((v) => {
+      const key = v.module_id ? "m" + v.module_id : "c" + v.category_id;
+      (groups[key] = groups[key] || []).push(v);
+    });
+    const fixes = Object.values(groups).filter((g) => g.some((v) => !v.position) && g.some((v) => v.position > 0));
+    if (fixes.length === 0) return;
+    (async () => {
+      for (const g of fixes) {
+        const ordered = [...g.filter((v) => v.position > 0), ...g.filter((v) => !v.position)];
+        const err = await saveOrder("student_videos", ordered);
+        if (err) return; // não tenta de novo em loop se o banco recusar
+      }
+      await load(true);
+    })();
+  }, [videos, loading]);
+
   // Enquanto houver vídeo "Processando", confere de novo a cada 10 segundos
   const hasProcessing = videos.some((v) => v.status === "processing");
   useEffect(() => {
@@ -5961,6 +6013,8 @@ function StudentContentManager() {
     await load();
   };
 
+  const moveSiblings = (v) => videos.filter((x) => (v.module_id ? x.module_id === v.module_id : (!x.module_id && x.category_id === v.category_id)));
+
   const videoRowProps = (v) => ({
     video: v,
     syncInfo: syncInfo[v.id],
@@ -5970,6 +6024,10 @@ function StudentContentManager() {
     onSaveEdit: () => saveEditVideo(v.id),
     onCancelEdit: () => setEditingVideoId(null),
     onDelete: () => handleDeleteVideo(v),
+    canMoveUp: moveSiblings(v).findIndex((x) => x.id === v.id) > 0,
+    canMoveDown: (() => { const sib = moveSiblings(v); const i = sib.findIndex((x) => x.id === v.id); return i >= 0 && i < sib.length - 1; })(),
+    onMoveUp: () => moveVideo(v, -1),
+    onMoveDown: () => moveVideo(v, 1),
     onCoverUploaded: async (url) => {
       const { error } = await supabase.from("student_videos").update({ cover_url: url }).eq("id", v.id);
       if (error) { notify("Não consegui salvar a capa: " + error.message); return; }
@@ -6039,7 +6097,7 @@ function StudentContentManager() {
           <p className="tf-muted" style={{ fontSize: 13 }}>Nenhuma categoria criada ainda.</p>
         ) : (
           <div>
-            {categories.map((cat) => {
+            {categories.map((cat, catIdx) => {
               const catModules = modules.filter((m) => m.category_id === cat.id);
               const catVideosNoModule = videos.filter((v) => v.category_id === cat.id && !v.module_id);
               return (
@@ -6063,6 +6121,8 @@ function StudentContentManager() {
                         {cat.description && <p className="tf-muted" style={{ fontSize: 12, margin: "2px 0 0" }}>{cat.description}</p>}
                       </div>
                       <div className="tf-ranking-actions">
+                        <button type="button" className="tf-row-action" disabled={catIdx === 0} onClick={() => moveCategory(cat.id, -1)} title="Subir categoria" aria-label="Subir categoria"><ChevronUp size={14} /></button>
+                        <button type="button" className="tf-row-action" disabled={catIdx === categories.length - 1} onClick={() => moveCategory(cat.id, 1)} title="Descer categoria" aria-label="Descer categoria"><ChevronDown size={14} /></button>
                         <CoverUploadButton
                           title="Trocar capa da categoria"
                           onUploaded={async (url) => {
@@ -6101,7 +6161,7 @@ function StudentContentManager() {
                       </form>
                     )}
 
-                    {catModules.map((mod) => {
+                    {catModules.map((mod, modIdx) => {
                       const modVideos = videos.filter((v) => v.module_id === mod.id);
                       return (
                         <div key={mod.id} className="tf-module-block">
@@ -6118,6 +6178,8 @@ function StudentContentManager() {
                             <div className="tf-module-header">
                               <span className="tf-module-header-title">{mod.name}</span>
                               <div className="tf-ranking-actions">
+                                <button type="button" className="tf-row-action" disabled={modIdx === 0} onClick={() => moveModule(mod, -1)} title="Subir módulo" aria-label="Subir módulo"><ChevronUp size={14} /></button>
+                                <button type="button" className="tf-row-action" disabled={modIdx === catModules.length - 1} onClick={() => moveModule(mod, 1)} title="Descer módulo" aria-label="Descer módulo"><ChevronDown size={14} /></button>
                                 <button type="button" className="tf-row-action" onClick={() => { setLinkModuleId(linkModuleId === mod.id ? null : mod.id); setUploadModuleId(null); }} title="Adicionar aula já enviada ao Bunny (recomendado para vídeos grandes)"><Link2 size={13} /></button>
                                 <button type="button" className="tf-row-action" onClick={() => { setUploadModuleId(uploadModuleId === mod.id ? null : mod.id); setLinkModuleId(null); }} title="Enviar vídeo por aqui"><Upload size={13} /></button>
                                 <button type="button" className="tf-row-action" onClick={() => startEditModule(mod)} title="Editar"><Pencil size={13} /></button>
@@ -6165,7 +6227,7 @@ function StudentContentManager() {
   );
 }
 
-function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded, onMaterialSelected, onMaterialRemove }) {
+function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDesc, setEditVideoTitle, setEditVideoDesc, savingVideo, onStartEdit, onSaveEdit, onCancelEdit, onDelete, onCoverUploaded, onMaterialSelected, onMaterialRemove, canMoveUp, canMoveDown, onMoveUp, onMoveDown }) {
   if (isEditing) {
     return (
       <div className="tf-mentor-edit-row">
@@ -6206,6 +6268,8 @@ function VideoAdminRow({ video, syncInfo, isEditing, editVideoTitle, editVideoDe
                 ? `Processando ${syncInfo.encodeProgress}%`
                 : "Processando"}
       </span>
+      <button type="button" className="tf-row-action" disabled={!canMoveUp} onClick={onMoveUp} title="Subir aula" aria-label="Subir aula"><ChevronUp size={14} /></button>
+      <button type="button" className="tf-row-action" disabled={!canMoveDown} onClick={onMoveDown} title="Descer aula" aria-label="Descer aula"><ChevronDown size={14} /></button>
       <MaterialAttachButton video={video} onSelected={onMaterialSelected} onRemove={onMaterialRemove} />
       <CoverUploadButton title="Trocar capa do vídeo" onUploaded={onCoverUploaded} />
       <button type="button" className="tf-row-action" onClick={onStartEdit} title="Editar"><Pencil size={13} /></button>
@@ -7402,6 +7466,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #0F172A; }
 .tf-steps li.done .tf-step-check{background:var(--lime);border-color:var(--lime);}
 .tf-step-body{flex:1;display:flex;flex-direction:column;gap:2px;}
 
+.tf-row-action:disabled{opacity:.3;cursor:default;pointer-events:none;}
 .tf-offline-bar{position:fixed;left:0;right:0;top:0;z-index:500;background:var(--coral);color:#fff;text-align:center;font-size:12.5px;font-weight:600;padding:7px 12px;}
 
 .tf-period-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:0 0 16px;}
