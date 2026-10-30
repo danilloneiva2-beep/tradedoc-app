@@ -736,15 +736,15 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
           <AreaChart data={equityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
             <defs>
               <linearGradient id="eqFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#1FA36F" stopOpacity={0.24} />
-                <stop offset="100%" stopColor="#1FA36F" stopOpacity={0.02} />
+                <stop offset="0%" stopColor="#6F9BD1" stopOpacity={0.26} />
+                <stop offset="100%" stopColor="#6F9BD1" stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="#151C25" vertical={false} />
-            <XAxis dataKey="d" stroke="#6B7787" fontSize={11} tickLine={false} axisLine={false} />
-            <YAxis stroke="#6B7787" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} domain={["auto", "auto"]} />
-            <Tooltip contentStyle={{ background: "#0D1116", border: "1px solid #1D2630", borderRadius: 3, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Capital"]} />
-            <Area type="monotone" dataKey="eq" stroke="#4CCB9B" strokeWidth={2.5} fill="url(#eqFill)" />
+            <CartesianGrid stroke="#1A2B42" vertical={false} />
+            <XAxis dataKey="d" stroke="#6F819B" fontSize={11} tickLine={false} axisLine={false} />
+            <YAxis stroke="#6F819B" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} domain={["auto", "auto"]} />
+            <Tooltip contentStyle={{ background: "#0F1C30", border: "1px solid #22344D", borderRadius: 3, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Capital"]} />
+            <Area type="monotone" dataKey="eq" stroke="#7BA6DA" strokeWidth={2.5} fill="url(#eqFill)" />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -1024,15 +1024,15 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
               <AreaChart data={monthEquityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="calEqFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#1FA36F" stopOpacity={0.24} />
-                    <stop offset="100%" stopColor="#1FA36F" stopOpacity={0.02} />
+                    <stop offset="0%" stopColor="#6F9BD1" stopOpacity={0.26} />
+                    <stop offset="100%" stopColor="#6F9BD1" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="#151C25" vertical={false} />
-                <XAxis dataKey="d" stroke="#6B7787" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#6B7787" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} domain={["auto", "auto"]} />
-                <Tooltip contentStyle={{ background: "#0D1116", border: "1px solid #1D2630", borderRadius: 3, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Resultado acumulado"]} />
-                <Area type="monotone" dataKey="eq" stroke="#4CCB9B" strokeWidth={2.5} fill="url(#calEqFill)" />
+                <CartesianGrid stroke="#1A2B42" vertical={false} />
+                <XAxis dataKey="d" stroke="#6F819B" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#6F819B" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} domain={["auto", "auto"]} />
+                <Tooltip contentStyle={{ background: "#0F1C30", border: "1px solid #22344D", borderRadius: 3, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Resultado acumulado"]} />
+                <Area type="monotone" dataKey="eq" stroke="#7BA6DA" strokeWidth={2.5} fill="url(#calEqFill)" />
               </AreaChart>
             </ResponsiveContainer>
           )}
@@ -1825,7 +1825,7 @@ function PropDeskView({ isProPlan }) {
       </div>
 
       <div className="tf-card tf-propdesk-card">
-        <div className="tf-pending-icon" style={{ background: "rgba(76,203,155,0.14)", color: "var(--lime)" }}>
+        <div className="tf-pending-icon" style={{ background: "rgba(91,185,138,0.14)", color: "var(--lime)" }}>
           <ShieldCheck size={22} />
         </div>
         <span className="tf-propdesk-tag">Exclusivo Pro</span>
@@ -2295,7 +2295,7 @@ function MacroMapView() {
 
     const wireframe = new THREE.Mesh(
       new THREE.SphereGeometry(RADIUS + 0.006, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0x4ccb9b, wireframe: true, transparent: true, opacity: 0.06 })
+      new THREE.MeshBasicMaterial({ color: 0x5bb98a, wireframe: true, transparent: true, opacity: 0.06 })
     );
     globeGroup.add(wireframe);
 
@@ -2310,7 +2310,7 @@ function MacroMapView() {
       const pos = latLonToVector3(country.lat, country.lon, RADIUS + 0.035);
       const marker = new THREE.Mesh(
         new THREE.SphereGeometry(0.065, 12, 12),
-        new THREE.MeshBasicMaterial({ color: 0x4ccb9b })
+        new THREE.MeshBasicMaterial({ color: 0x5bb98a })
       );
       marker.position.copy(pos);
       marker.userData.country = country;
@@ -2620,7 +2620,7 @@ function MindsetView({ trades, isProPlan }) {
         </div>
 
         <div className="tf-card tf-propdesk-card">
-          <div className="tf-pending-icon" style={{ background: "rgba(229,99,110,0.14)", color: "var(--coral)" }}>
+          <div className="tf-pending-icon" style={{ background: "rgba(217,112,123,0.14)", color: "var(--coral)" }}>
             <Brain size={22} />
           </div>
           <span className="tf-propdesk-tag">Exclusivo Pro</span>
@@ -3661,7 +3661,7 @@ export default function App() {
   // "bounce"/elastic overscroll effect. Keep html/body painted the same
   // color as the app so that effect never shows a white flash.
   useEffect(() => {
-    const bg = theme === "light" ? "#F5F7FA" : "#07090C";
+    const bg = theme === "light" ? "#F5F7FA" : "#0A1424";
     document.documentElement.style.backgroundColor = bg;
     document.body.style.backgroundColor = bg;
     let meta = document.querySelector('meta[name="theme-color"]');
@@ -4395,15 +4395,15 @@ function ShareDetail({ share, onBack }) {
                 <AreaChart data={stats.curve} margin={{ top: 10, right: 8, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="shareFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#1FA36F" stopOpacity={0.24} />
-                      <stop offset="100%" stopColor="#1FA36F" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor="#6F9BD1" stopOpacity={0.26} />
+                      <stop offset="100%" stopColor="#6F9BD1" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#151C25" vertical={false} />
-                  <XAxis dataKey="d" stroke="#6B7787" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#6B7787" fontSize={11} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={{ background: "#0D1116", border: "1px solid #1D2630", borderRadius: 3, fontSize: 12 }} formatter={(v) => [fmtBRL(v), "Acumulado"]} />
-                  <Area type="monotone" dataKey="eq" stroke="#4CCB9B" strokeWidth={2.5} fill="url(#shareFill)" />
+                  <CartesianGrid stroke="#1A2B42" vertical={false} />
+                  <XAxis dataKey="d" stroke="#6F819B" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#6F819B" fontSize={11} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: "#0F1C30", border: "1px solid #22344D", borderRadius: 3, fontSize: 12 }} formatter={(v) => [fmtBRL(v), "Acumulado"]} />
+                  <Area type="monotone" dataKey="eq" stroke="#7BA6DA" strokeWidth={2.5} fill="url(#shareFill)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -5795,8 +5795,8 @@ function StudentAccessManager() {
 }
 
 const APP_STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
-.tf-app { --bg:#07090C; --surface:#0D1116; --surface-2:#121821; --border:#1D2630; --text:#E9EEF3; --muted:#8995A5; --blue:#178A5E; --blue-dim:#112A22; --lime:#4CCB9B; --coral:#E5636E; --brand:#178A5E; --brand-hover:#1D9C6C; --brand-text:#FFFFFF; --on-brand:#5FD6A8; --sidebar:#0A0D11; display:flex; min-height:100vh; min-height:100dvh; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+.tf-app { --bg:#0A1424; --surface:#0F1C30; --surface-2:#14243B; --border:#22344D; --text:#E6ECF5; --muted:#8C9DB5; --blue:#357E55; --blue-dim:#15342E; --lime:#5BB98A; --coral:#D9707B; --brand:#357E55; --brand-hover:#3F8F63; --brand-text:#FFFFFF; --on-brand:#8FD3A8; --sidebar:#070F1B; display:flex; min-height:100vh; min-height:100dvh; background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
 .tf-app * { box-sizing:border-box; }
 .text-lime{color:var(--lime);} .text-coral{color:var(--coral);} .text-blue{color:var(--blue);}
 .tf-mono{font-family:'JetBrains Mono',monospace;} .tf-muted{color:var(--muted);font-size:13px;} .tf-empty{color:var(--muted);font-size:13px;padding:10px 0;}
@@ -5825,7 +5825,7 @@ const APP_STYLES = `
 .tf-brand-mark-img{height:24px;width:auto;flex-shrink:0;}
 .tf-nav{display:flex;flex-direction:column;gap:3px;flex:1;}
 .tf-nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:3px;border:none;background:transparent;color:var(--muted);font-size:13.5px;font-weight:500;cursor:pointer;text-align:left;}
-.tf-nav-badge{margin-left:auto;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;background:rgba(76,203,155,0.16);color:var(--lime);padding:2px 7px;border-radius:3px;flex-shrink:0;}
+.tf-nav-badge{margin-left:auto;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;background:rgba(91,185,138,0.16);color:var(--lime);padding:2px 7px;border-radius:3px;flex-shrink:0;}
 
 .tf-propdesk-card{text-align:center;padding:44px 24px;}
 .tf-propdesk-tag{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;background:var(--surface-2);color:var(--muted);padding:4px 12px;border-radius:3px;margin-bottom:14px;}
@@ -5844,7 +5844,7 @@ const APP_STYLES = `
 .tf-user-chip:hover{background:var(--surface-2);}
 .tf-user-avatar{width:24px;height:24px;border-radius:50%;background:var(--blue-dim);color:var(--on-brand);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;}
 .tf-user-name{font-size:12.5px;font-weight:500;}
-.tf-view{flex:1;padding:26px 30px;overflow-y:auto;background-image:linear-gradient(rgba(255,255,255,0.022) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.022) 1px,transparent 1px);background-size:44px 44px;}
+.tf-view{flex:1;padding:26px 30px;overflow-y:auto;}
 .tf-view-header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px;}
 .tf-view-header-actions{display:flex;align-items:center;gap:10px;}
 .tf-filter-wrap{position:relative;}
@@ -5872,19 +5872,19 @@ const APP_STYLES = `
 .tf-btn-primary:disabled,.tf-btn-outline:disabled{opacity:.55;cursor:not-allowed;}
 .tf-card{background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:18px 20px;}
 .tf-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
-.tf-card-head h3{font-family:'Inter',sans-serif;font-size:12px;font-weight:600;margin:0;text-transform:uppercase;letter-spacing:.1em;}
+.tf-card-head h3{font-family:'Exo 2',sans-serif;font-size:14.5px;font-weight:600;margin:0;}
 .tf-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px;}
 
 .tf-cal-stats-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px;}
 .tf-stat{display:flex;flex-direction:column;gap:6px;} .tf-stat-top{display:flex;align-items:center;justify-content:space-between;}
-.tf-stat-label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.08em;}
+.tf-stat-label{font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
 .tf-icon-badge{width:26px;height:26px;border-radius:3px;display:flex;align-items:center;justify-content:center;}
-.tone-up{background:rgba(31,163,111,0.16);color:var(--lime);} .tone-down{background:rgba(229,99,110,0.12);color:var(--coral);} .tone-neutral{background:rgba(137,149,165,0.14);color:#B3BDCA;}
-.tf-stat-value{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;letter-spacing:-0.02em;}
+.tone-up{background:rgba(60,138,88,0.18);color:var(--lime);} .tone-down{background:rgba(217,112,123,0.12);color:var(--coral);} .tone-neutral{background:rgba(140,157,181,0.14);color:#B2C0D4;}
+.tf-stat-value{font-family:'Exo 2',sans-serif;font-size:22px;font-weight:600;}
 .tf-hero-chart{margin-bottom:16px;} .tf-hero-value{font-family:'JetBrains Mono',monospace;font-size:15px;}
 .tf-two-col{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;}
 .tf-table-row{display:grid;grid-template-columns:1.2fr .8fr .8fr 1fr;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;align-items:center;}
-.tf-table-row:last-child{border-bottom:none;} .tf-table-head{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;}
+.tf-table-row:last-child{border-bottom:none;} .tf-table-head{color:var(--muted);font-size:11.5px;text-transform:uppercase;}
 .tf-asset{font-weight:600;}
 .tf-trade-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
 
@@ -5924,8 +5924,8 @@ const APP_STYLES = `
 .tf-chat-body{
   flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px;
   background:
-    radial-gradient(circle at 20% 30%, rgba(76,203,155,0.03) 0%, transparent 40%),
-    radial-gradient(circle at 80% 70%, rgba(31,163,111,0.03) 0%, transparent 40%);
+    radial-gradient(circle at 20% 30%, rgba(91,185,138,0.03) 0%, transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(111,155,209,0.03) 0%, transparent 40%);
 }
 .tf-chat-bubble{
   align-self:flex-start; max-width:78%; background:var(--surface-2); border:1px solid var(--border);
@@ -5978,22 +5978,22 @@ const APP_STYLES = `
   width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center;
   font-weight:800; font-size:13px; flex-shrink:0;
 }
-.tf-ranking-avatar-b3{background:rgba(137,149,165,.16); color:#B3BDCA;}
-.tf-ranking-avatar-forex{background:rgba(229,99,110,.18); color:#F0997B;}
+.tf-ranking-avatar-b3{background:rgba(111,155,209,.18); color:#9DBBDD;}
+.tf-ranking-avatar-forex{background:rgba(217,112,123,.18); color:#F0997B;}
 .tf-ranking-market{
   flex-shrink:0; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
   padding:4px 9px; border-radius:3px;
 }
-.tf-ranking-market.market-b3{background:rgba(137,149,165,.16); color:#B3BDCA;}
-.tf-ranking-market.market-forex{background:rgba(229,99,110,.16); color:#F0997B;}
+.tf-ranking-market.market-b3{background:rgba(111,155,209,.16); color:#9DBBDD;}
+.tf-ranking-market.market-forex{background:rgba(217,112,123,.16); color:#F0997B;}
 .tf-mood-pill{
   background:var(--surface-2);border:1px solid var(--border);color:var(--muted);
   font-size:12px;padding:6px 13px;border-radius:3px;cursor:pointer;transition:all .15s;
 }
-.tf-mood-pill.active{background:rgba(229,99,110,0.15);border-color:var(--coral);color:var(--coral);}
+.tf-mood-pill.active{background:rgba(217,112,123,0.15);border-color:var(--coral);color:var(--coral);}
 .tf-mood-insight{
   display:flex;gap:10px;align-items:flex-start;margin-top:16px;
-  background:rgba(229,99,110,0.08);border:1px solid rgba(229,99,110,0.3);
+  background:rgba(217,112,123,0.08);border:1px solid rgba(217,112,123,0.3);
   border-radius:3px;padding:12px 14px;font-size:12px;line-height:1.5;color:var(--text);
 }
 .tf-mood-insight svg{color:var(--coral);flex-shrink:0;margin-top:1px;}
@@ -6030,11 +6030,11 @@ const APP_STYLES = `
 .tf-share-account-type{font-size:11.5px;}
 .tf-share-preview{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:3px;font-size:13px;}
 .tf-share-preview strong{margin:0 4px 0 8px;}
-.tf-share-error{padding:10px 12px;border-radius:3px;background:rgba(229,99,110,0.12);color:var(--coral);font-size:12.5px;}
+.tf-share-error{padding:10px 12px;border-radius:3px;background:rgba(217,112,123,0.12);color:var(--coral);font-size:12.5px;}
 .tf-share-success{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:10px 0 6px;}
 .tf-share-success h4{margin:0;font-size:16px;}
 .tf-share-success p{margin:0 0 6px;font-size:12.5px;}
-.tf-share-success-icon{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(31,163,111,0.18);color:var(--lime);}
+.tf-share-success-icon{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(60,138,88,0.18);color:var(--lime);}
 .tf-share-history{margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
 .tf-share-history h4{margin:0 0 8px;font-size:13px;font-weight:600;}
 .tf-share-history-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);}
@@ -6075,7 +6075,7 @@ const APP_STYLES = `
 }
 .tf-account-card{display:flex;flex-direction:column;gap:8px;} .tf-account-top{display:flex;align-items:center;justify-content:space-between;}
 .tf-badge{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:3px;text-transform:uppercase;}
-.badge-blue{background:rgba(137,149,165,0.16);color:#B3BDCA;} .badge-outline{border:1px solid var(--border);color:var(--muted);}
+.badge-blue{background:rgba(111,155,209,0.18);color:#9DBBDD;} .badge-outline{border:1px solid var(--border);color:var(--muted);}
 .tf-account-name{font-size:14px;font-weight:600;margin:2px 0 0;font-family:'Exo 2',sans-serif;}
 .tf-account-balance{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:600;}
 .tf-account-status{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin-top:2px;}
@@ -6093,7 +6093,7 @@ const APP_STYLES = `
 .tf-auth-card{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:28px 26px;text-align:center;}
 .tf-auth-tagline-brand{font-family:'Exo 2',sans-serif;font-weight:700;font-size:11px;letter-spacing:.06em;margin:2px 0 14px;}
 .tf-onboarding-title{font-family:'Exo 2',sans-serif;font-size:17px;margin:0 0 14px;}
-.tf-pending-icon{width:44px;height:44px;border-radius:3px;background:rgba(229,99,110,0.12);color:var(--coral);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+.tf-pending-icon{width:44px;height:44px;border-radius:3px;background:rgba(217,112,123,0.12);color:var(--coral);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
 
 .tf-loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;padding:24px;}
 .tf-loading-mark img{height:38px;width:auto;margin-bottom:30px;opacity:.95;}
@@ -6140,13 +6140,13 @@ const APP_STYLES = `
 .tf-macro-label{
   position:absolute; top:0; left:0; pointer-events:auto; cursor:pointer;
   font-size:10.5px; font-weight:700; color:#F5F7FA;
-  background:rgba(11,17,25,0.72); border:1px solid rgba(76,203,155,0.4);
+  background:rgba(11,17,25,0.72); border:1px solid rgba(91,185,138,0.4);
   padding:2px 7px; border-radius:3px; white-space:nowrap;
   transform:translate(-9999px,-9999px);
   margin-left:8px; margin-top:-9px;
   display:none; z-index:4; transition:opacity .15s;
 }
-.tf-macro-label:hover{background:rgba(76,203,155,0.25); border-color:var(--lime);}
+.tf-macro-label:hover{background:rgba(91,185,138,0.25); border-color:var(--lime);}
 .tf-macro-panel{min-height:440px;}
 .tf-macro-panel-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);}
 
@@ -6169,8 +6169,8 @@ const APP_STYLES = `
   display:block; background:var(--surface); border:1px solid var(--border); border-radius:4px;
   padding:16px 18px; text-decoration:none; color:inherit; transition:border-color .15s, transform .15s;
 }
-.tf-news-card:hover{border-color:rgba(76,203,155,.4); transform:translateY(-2px);}
-.tf-news-card-highlight{border-color:rgba(76,203,155,.35); background:linear-gradient(160deg, var(--surface) 0%, rgba(76,203,155,.06) 140%);}
+.tf-news-card:hover{border-color:rgba(91,185,138,.4); transform:translateY(-2px);}
+.tf-news-card-highlight{border-color:rgba(91,185,138,.35); background:linear-gradient(160deg, var(--surface) 0%, rgba(91,185,138,.06) 140%);}
 .tf-news-card-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:9px;}
 .tf-news-source{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--lime);}
 .tf-news-time{font-size:11px; color:var(--muted);}
@@ -6188,15 +6188,15 @@ const APP_STYLES = `
 .tf-toggle-group{display:flex;border:1px solid var(--border);border-radius:3px;overflow:hidden;}
 .tf-toggle-group button{flex:1;padding:8px 0;background:var(--surface-2);border:none;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;}
 .tf-toggle-group button.active{background:var(--blue-dim);color:var(--on-brand);}
-.tf-toggle-group button.active.tone-win{background:rgba(31,163,111,0.18);color:var(--lime);}
-.tf-toggle-group button.active.tone-loss{background:rgba(229,99,110,0.18);color:var(--coral);}
+.tf-toggle-group button.active.tone-win{background:rgba(60,138,88,0.18);color:var(--lime);}
+.tf-toggle-group button.active.tone-loss{background:rgba(217,112,123,0.18);color:var(--coral);}
 .tf-form-submit{justify-content:center;margin-top:4px;}
 .tf-skip-link{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;margin-top:12px;text-decoration:underline;}
 .tf-forgot-link{background:none;border:none;color:var(--lime);font-size:12px;cursor:pointer;text-decoration:underline;align-self:flex-end;margin-top:-6px;padding:0;}
 
 .tf-signup-cta-banner{
   display:flex; align-items:center; justify-content:space-between; gap:8px;
-  background:rgba(76,203,155,0.10); border:1px solid rgba(76,203,155,0.35);
+  background:rgba(91,185,138,0.10); border:1px solid rgba(91,185,138,0.35);
   border-radius:3px; padding:11px 14px; margin-bottom:16px;
   font-size:12.5px; color:var(--text); text-decoration:none;
 }
@@ -6223,12 +6223,12 @@ const APP_STYLES = `
 .tf-cal-cell.has-day{border-color:var(--border);cursor:pointer;} .tf-cal-cell.has-day:hover{border-color:var(--blue);}
 .tf-cal-day{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;}
 .tf-cal-pnl{font-size:10.5px;font-weight:600;font-family:'JetBrains Mono',monospace;}
-.tone-lime-1{background:rgba(31,163,111,0.14);} .tone-lime-1 .tf-cal-pnl{color:#4CCB9B;}
-.tone-lime-2{background:rgba(31,163,111,0.26);} .tone-lime-2 .tf-cal-pnl{color:var(--lime);}
-.tone-lime-3{background:rgba(31,163,111,0.42);} .tone-lime-3 .tf-cal-pnl{color:var(--lime);}
-.tone-coral-1{background:rgba(229,99,110,0.12);} .tone-coral-1 .tf-cal-pnl{color:#F0959D;}
-.tone-coral-2{background:rgba(229,99,110,0.22);} .tone-coral-2 .tf-cal-pnl{color:var(--coral);}
-.tone-coral-3{background:rgba(229,99,110,0.34);} .tone-coral-3 .tf-cal-pnl{color:var(--coral);}
+.tone-lime-1{background:rgba(60,138,88,0.16);} .tone-lime-1 .tf-cal-pnl{color:#8FD3A8;}
+.tone-lime-2{background:rgba(60,138,88,0.28);} .tone-lime-2 .tf-cal-pnl{color:var(--lime);}
+.tone-lime-3{background:rgba(60,138,88,0.44);} .tone-lime-3 .tf-cal-pnl{color:var(--lime);}
+.tone-coral-1{background:rgba(217,112,123,0.12);} .tone-coral-1 .tf-cal-pnl{color:#F2A2AA;}
+.tone-coral-2{background:rgba(217,112,123,0.22);} .tone-coral-2 .tf-cal-pnl{color:var(--coral);}
+.tone-coral-3{background:rgba(217,112,123,0.34);} .tone-coral-3 .tf-cal-pnl{color:var(--coral);}
 .tone-empty{background:transparent;}
 .tf-daymodal-total{display:flex;align-items:center;justify-content:space-between;padding:10px 0;margin-bottom:8px;border-bottom:1px solid var(--border);font-size:13.5px;}
 
@@ -6249,17 +6249,16 @@ const APP_STYLES = `
 /* ===================== LIGHT THEME ===================== */
 .tf-app.theme-light {
   --bg:#F5F7FA; --surface:#FFFFFF; --surface-2:#EEF1F5; --border:#DDE2E8;
-  --text:#0F172A; --muted:#5B6472; --blue:#17805A; --blue-dim:#DDF1E8;
-  --lime:#17805A; --coral:#C23B4E;
-  --brand:#17805A; --brand-hover:#136B4B; --brand-text:#FFFFFF; --on-brand:#0F5A3E; --sidebar:#FFFFFF;
+  --text:#0F172A; --muted:#5B6472; --blue:#2F7D52; --blue-dim:#E3F1E8;
+  --lime:#2A7048; --coral:#B73A46;
+  --brand:#2F7D52; --brand-hover:#276A44; --brand-text:#FFFFFF; --on-brand:#1F5A3A; --sidebar:#FFFFFF;
 }
-.tf-app.theme-light .tf-view{background-image:none;}
 .tf-app.theme-light .tf-nav-item.active,
 .tf-app.theme-light .tf-user-avatar,
-.tf-app.theme-light .tf-toggle-group button.active { color:#0F5A3E; }
+.tf-app.theme-light .tf-toggle-group button.active { color:#1F5A3A; }
 .tf-app.theme-light .tone-neutral,
 .tf-app.theme-light .badge-blue { color:#46556A; }
-.tf-app.theme-light .tone-lime-1 .tf-cal-pnl { color:#17805A; }
+.tf-app.theme-light .tone-lime-1 .tf-cal-pnl { color:#2A7048; }
 .tf-app.theme-light .tone-coral-1 .tf-cal-pnl { color:#B73A46; }
 .tf-app.theme-light .tf-form-row input, .tf-app.theme-light .tf-form-row select,
 .tf-app.theme-light .tf-input-icon input { color-scheme: light; }
@@ -6294,7 +6293,7 @@ const APP_STYLES = `
 .tf-sidebar-backdrop{display:none;}
 
 /* ===================== RESPONSIVE ===================== */
-html, body { overflow-x: hidden; max-width: 100%; background: #07090C; }
+html, body { overflow-x: hidden; max-width: 100%; background: #0A1424; }
 
 @media (max-width: 860px) {
   .tf-app { flex-direction: column; min-height: 100vh; }
@@ -6400,7 +6399,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #07090C; }
 .tf-video-card:hover{ border-color:var(--lime); }
 .tf-video-card-disabled{ cursor:default; opacity:.6; }
 .tf-video-card-disabled:hover{ border-color:var(--border); }
-.tf-video-thumb{ display:flex; align-items:center; justify-content:center; aspect-ratio:16/9; background:linear-gradient(135deg,#0D1116,#07090C); color:var(--lime); }
+.tf-video-thumb{ display:flex; align-items:center; justify-content:center; aspect-ratio:16/9; background:linear-gradient(135deg,#0F1C30,#09111F); color:var(--lime); }
 .tf-video-info{ padding:8px 10px 12px; }
 .tf-video-title{ font-size:12.5px; font-weight:600; display:block; line-height:1.3; }
 .tf-video-status{ font-size:11px; color:var(--muted); }
@@ -6411,7 +6410,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #07090C; }
 .tf-upload-progress{ position:relative; height:22px; background:var(--surface-2); border-radius:2px; overflow:hidden; margin:8px 0; border:1px solid var(--border); }
 .tf-upload-progress-bar{ position:absolute; inset:0 auto 0 0; background:var(--brand); transition:width .2s; }
 .tf-upload-progress span{ position:relative; z-index:1; display:block; text-align:center; font-size:11px; line-height:22px; font-weight:700; color:var(--text); }
-.tf-badge-error{ background:rgba(229,99,110,0.16); color:var(--coral); }
+.tf-badge-error{ background:rgba(217,112,123,0.16); color:var(--coral); }
 .tf-modal-video{ width:100%; max-width:760px; }
 .tf-video-player-wrap{ position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:3px; overflow:hidden; margin-top:6px; }
 .tf-video-player-wrap iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
@@ -6439,8 +6438,8 @@ html, body { overflow-x: hidden; max-width: 100%; background: #07090C; }
    nessa proporção em qualquer tela, sem esticar nem distorcer.
 ------------------------------------------------------------------------------- */
 .tf-netflix-section{ margin-bottom: 28px; }
-.tf-category-banner{ position:relative; border-radius:4px; overflow:hidden; margin-bottom:14px; aspect-ratio:5/1; background:linear-gradient(135deg,#0D1116,#07090C); }
-.tf-category-banner-empty{ aspect-ratio:auto; padding:16px 18px; background:linear-gradient(135deg,#0D1116,#07090C); }
+.tf-category-banner{ position:relative; border-radius:4px; overflow:hidden; margin-bottom:14px; aspect-ratio:5/1; background:linear-gradient(135deg,#0F1C30,#09111F); }
+.tf-category-banner-empty{ aspect-ratio:auto; padding:16px 18px; background:linear-gradient(135deg,#0F1C30,#09111F); }
 .tf-category-banner img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
 .tf-category-banner-overlay{ position:relative; z-index:1; display:flex; align-items:flex-end; height:100%; padding:16px 18px; background:linear-gradient(to top, rgba(5,8,14,0.85), rgba(5,8,14,0.05) 65%); }
 .tf-category-banner-empty .tf-category-banner-overlay{ position:static; background:none; padding:0; height:auto; align-items:flex-start; }
@@ -6456,7 +6455,7 @@ html, body { overflow-x: hidden; max-width: 100%; background: #07090C; }
 .tf-netflix-card:disabled{ cursor:default; }
 .tf-netflix-info .tf-video-title{ color:var(--text); }
 .tf-netflix-info .tf-video-status{ color:var(--muted); }
-.tf-netflix-poster{ position:relative; aspect-ratio:2/3; border-radius:3px; overflow:hidden; background:linear-gradient(135deg,#0D1116,#07090C); border:1px solid var(--border); transition:border-color .15s, transform .15s; }
+.tf-netflix-poster{ position:relative; aspect-ratio:2/3; border-radius:3px; overflow:hidden; background:linear-gradient(135deg,#0F1C30,#09111F); border:1px solid var(--border); transition:border-color .15s, transform .15s; }
 .tf-netflix-card:not(:disabled):hover .tf-netflix-poster{ border-color:var(--lime); transform:translateY(-2px); }
 .tf-netflix-poster img{ width:100%; height:100%; object-fit:cover; display:block; }
 .tf-netflix-poster-fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--lime); }
