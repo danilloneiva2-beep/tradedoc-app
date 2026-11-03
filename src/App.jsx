@@ -3230,6 +3230,161 @@ const MACRO_COUNTRIES = [
   { name: "Finlândia", iso2: "FI", lat: 64, lon: 26 },
 ];
 
+const MACRO_MAP_ISO2 = MACRO_COUNTRIES.map((c) => c.iso2);
+
+/* ---- Fontes de dados do Mapa Macro ----
+   Cada indicador usa a fonte MAIS RECENTE disponível pra aquele país:
+   Banco Central do Brasil (Brasil), BIS (juros dos bancos centrais, mensal),
+   Eurostat e OCDE (inflação e desemprego, mensal) e Banco Mundial (anual, só quando não há dado mais novo). */
+const MACRO_REFRESH_MS = 30 * 60 * 1000; // atualiza sozinho a cada 30 min enquanto a tela está aberta
+const MACRO_EURO = ["DE", "FR", "IT", "ES", "NL", "BE", "AT", "IE", "PT", "FI"];
+const MACRO_EUROSTAT_GEOS = ["DE", "FR", "IT", "ES", "NL", "BE", "AT", "IE", "PT", "FI", "PL", "SE", "DK"];
+const MACRO_ISO3 = {
+  US: "USA", CN: "CHN", JP: "JPN", DE: "DEU", IN: "IND", GB: "GBR", FR: "FRA", IT: "ITA", BR: "BRA", CA: "CAN",
+  RU: "RUS", KR: "KOR", AU: "AUS", ES: "ESP", MX: "MEX", ID: "IDN", NL: "NLD", SA: "SAU", TR: "TUR", CH: "CHE",
+  PL: "POL", AR: "ARG", SE: "SWE", BE: "BEL", TH: "THA", IE: "IRL", IL: "ISR", NG: "NGA", AT: "AUT", AE: "ARE",
+  NO: "NOR", EG: "EGY", ZA: "ZAF", PH: "PHL", VN: "VNM", BD: "BGD", CL: "CHL", CO: "COL", PE: "PER", PT: "PRT",
+  DK: "DNK", MY: "MYS", SG: "SGP", NZ: "NZL", FI: "FIN",
+};
+const MACRO_ISO3_TO_2 = Object.fromEntries(Object.entries(MACRO_ISO3).map(([k, v]) => [v, k]));
+
+function macroParseCSV(text) {
+  const rows = [];
+  let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+async function macroFetchWithTimeout(url, ms = 15000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(url, { signal: ctrl.signal }); } finally { clearTimeout(t); }
+}
+
+// "2026-09" / "2026-09-15" / "2025" -> número comparável (annual conta como meio do ano pra perder desempate)
+function macroDateRank(d) {
+  if (!d) return 0;
+  const [y, m = "06", day = "15"] = String(d).split("-");
+  return Number(y) * 10000 + Number(m) * 100 + Number(day) / 100;
+}
+function macroPickFreshest(...cands) {
+  const ok = cands.filter((c) => c && c.value != null && Number.isFinite(Number(c.value)));
+  if (!ok.length) return null;
+  return ok.reduce((best, c) => (macroDateRank(c.date) > macroDateRank(best.date) ? c : best));
+}
+
+// ---- BIS: taxa básica de juros de todos os bancos centrais (mensal) ----
+async function macroLoadBIS() {
+  const res = await macroFetchWithTimeout("https://stats.bis.org/api/v1/data/WS_CBPOL/M..?lastNObservations=1&format=csv");
+  if (!res.ok) throw new Error("BIS " + res.status);
+  const rows = macroParseCSV(await res.text());
+  const h = rows[0];
+  const iA = h.indexOf("REF_AREA"), iP = h.indexOf("TIME_PERIOD"), iV = h.indexOf("OBS_VALUE");
+  const byArea = {};
+  rows.slice(1).forEach((r) => {
+    const v = parseFloat(r[iV]);
+    if (r.length > iV && Number.isFinite(v)) byArea[r[iA]] = { value: v, date: r[iP], src: "BIS" };
+  });
+  const out = {};
+  MACRO_MAP_ISO2.forEach((iso2) => {
+    const a = MACRO_EURO.includes(iso2) ? "XM" : iso2;
+    if (byArea[a]) out[iso2] = byArea[a];
+  });
+  return out;
+}
+
+// ---- OCDE: inflação 12m e desemprego (mensal) ----
+async function macroLoadOECDCpi() {
+  const res = await macroFetchWithTimeout("https://sdmx.oecd.org/public/rest/data/OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL,1.0/.M.N.CPI.PA._T.N.GY?lastNObservations=1&format=csvfile");
+  if (!res.ok) throw new Error("OECD CPI " + res.status);
+  const rows = macroParseCSV(await res.text());
+  const h = rows[0];
+  const iA = h.indexOf("REF_AREA"), iP = h.indexOf("TIME_PERIOD"), iV = h.indexOf("OBS_VALUE");
+  const out = {};
+  rows.slice(1).forEach((r) => {
+    const iso2 = MACRO_ISO3_TO_2[r[iA]];
+    const v = parseFloat(r[iV]);
+    if (iso2 && Number.isFinite(v)) out[iso2] = { value: v, date: r[iP], src: "OCDE" };
+  });
+  return out;
+}
+
+async function macroLoadOECDUnemp() {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 5);
+  const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const res = await macroFetchWithTimeout(`https://sdmx.oecd.org/public/rest/data/OECD.SDD.TPS,DSD_LFS@DF_IALFS_UNE_M,1.0/.UNE_LF_M.......M?startPeriod=${start}&format=csvfile`, 25000);
+  if (!res.ok) throw new Error("OECD UNE " + res.status);
+  const rows = macroParseCSV(await res.text());
+  const h = rows[0];
+  const ix = (n) => h.indexOf(n);
+  const out = {};
+  rows.slice(1).forEach((r) => {
+    if (r.length < 10 || r[ix("SEX")] !== "_T" || r[ix("AGE")] !== "Y_GE15" || r[ix("ADJUSTMENT")] !== "Y" || r[ix("UNIT_MEASURE")] !== "PT_LF_SUB") return;
+    const iso2 = MACRO_ISO3_TO_2[r[ix("REF_AREA")]];
+    const v = parseFloat(r[ix("OBS_VALUE")]);
+    const p = r[ix("TIME_PERIOD")];
+    if (iso2 && Number.isFinite(v) && (!out[iso2] || p > out[iso2].date)) out[iso2] = { value: v, date: p, src: "OCDE" };
+  });
+  return out;
+}
+
+// ---- Eurostat: inflação 12m (IPCA harmonizado) e desemprego dos países europeus ----
+async function macroEurostat(dataset, params) {
+  const geos = MACRO_EUROSTAT_GEOS.map((g) => "geo=" + g).join("&");
+  const res = await macroFetchWithTimeout(`https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/${dataset}?format=JSON&lang=EN&${params}&lastTimePeriod=4&${geos}`);
+  if (!res.ok) throw new Error("Eurostat " + res.status);
+  const j = await res.json();
+  if (!j.value) return {};
+  const geoIdx = j.dimension.geo.category.index;
+  const timeIdx = j.dimension.time.category.index;
+  const times = Object.keys(timeIdx).sort((a, b) => timeIdx[a] - timeIdx[b]);
+  const out = {};
+  Object.keys(geoIdx).forEach((g) => {
+    for (let ti = times.length - 1; ti >= 0; ti--) {
+      const v = j.value[geoIdx[g] * times.length + ti];
+      if (v !== undefined && v !== null) { out[g] = { value: v, date: times[ti], src: "Eurostat" }; break; }
+    }
+  });
+  return out;
+}
+const macroLoadEurostatCpi = () => macroEurostat("prc_hicp_minr", "coicop18=TOTAL&unit=RCH_A");
+const macroLoadEurostatUnemp = () => macroEurostat("une_rt_m", "s_adj=SA&age=TOTAL&unit=PC_ACT&sex=T");
+
+// ---- Banco Central do Brasil (SGS): tudo do Brasil, o mais recente possível ----
+async function macroBCB(code) {
+  const res = await macroFetchWithTimeout(`https://api.bcb.gov.br/dados/serie/bcdata.sgs.${code}/dados/ultimos/1?formato=json`);
+  if (!res.ok) throw new Error("BCB " + res.status);
+  const j = await res.json();
+  const last = j?.[0];
+  if (!last) return null;
+  const [dd, mm, yyyy] = last.data.split("/");
+  let date = `${yyyy}-${mm}-${dd}`;
+  const today = localDateStr();
+  if (date > today) date = today;
+  return { value: parseFloat(last.valor), date, src: "Banco Central do Brasil" };
+}
+async function macroLoadBrazil() {
+  const [infl, rate, unemp, debt, gdpBrl, usd] = await Promise.allSettled([
+    macroBCB(13522), macroBCB(432), macroBCB(24369), macroBCB(13762), macroBCB(4382), macroBCB(1),
+  ]);
+  const v = (r) => (r.status === "fulfilled" ? r.value : null);
+  const out = { inflation: v(infl), rate: v(rate), unemployment: v(unemp), debt: v(debt), gdp: null };
+  const g = v(gdpBrl), u = v(usd);
+  if (g && u && u.value > 0) out.gdp = { value: (g.value * 1e6) / u.value, date: g.date, src: "Banco Central do Brasil", note: "acumulado 12 meses, em dólar" };
+  return out;
+}
+
+// ---- Banco Mundial: dado anual (só entra quando não existe dado mais novo) ----
 const MACRO_INDICATORS = {
   gdp: "NY.GDP.MKTP.CD",
   inflation: "FP.CPI.TOTL.ZG",
@@ -3237,19 +3392,88 @@ const MACRO_INDICATORS = {
   debt: "GC.DOD.TOTL.GD.ZS",
   realInterest: "FR.INR.RINR",
 };
-
 async function fetchWorldBankIndicator(iso2, code) {
   try {
-    const res = await fetch(`https://api.worldbank.org/v2/country/${iso2}/indicator/${code}?format=json&mrv=6`);
+    const res = await macroFetchWithTimeout(`https://api.worldbank.org/v2/country/${iso2}/indicator/${code}?format=json&mrv=8`);
     if (!res.ok) return null;
     const json = await res.json();
     const rows = json?.[1];
     if (!Array.isArray(rows)) return null;
     const found = rows.find((r) => r.value !== null && r.value !== undefined);
-    return found ? { value: found.value, date: found.date } : null;
+    return found ? { value: found.value, date: String(found.date), src: "Banco Mundial", annual: true } : null;
   } catch {
     return null;
   }
+}
+
+let macroBulkCache = { ts: 0, data: null, promise: null };
+async function macroLoadBulk(force = false) {
+  if (!force && macroBulkCache.data && Date.now() - macroBulkCache.ts < MACRO_REFRESH_MS) return macroBulkCache.data;
+  if (macroBulkCache.promise) return macroBulkCache.promise;
+  macroBulkCache.promise = (async () => {
+    const names = ["bis", "oecdCpi", "oecdUnemp", "euCpi", "euUnemp", "brazil"];
+    const results = await Promise.allSettled([
+      macroLoadBIS(), macroLoadOECDCpi(), macroLoadOECDUnemp(), macroLoadEurostatCpi(), macroLoadEurostatUnemp(), macroLoadBrazil(),
+    ]);
+    const data = { ts: Date.now() };
+    results.forEach((r, i) => { data[names[i]] = r.status === "fulfilled" ? r.value : null; });
+    macroBulkCache = { ts: data.ts, data, promise: null };
+    return data;
+  })().catch((e) => { macroBulkCache.promise = null; throw e; });
+  return macroBulkCache.promise;
+}
+
+// Monta os 6 indicadores de um país usando sempre a fonte mais recente.
+async function macroBuildCountry(country, bulk) {
+  const iso2 = country.iso2;
+  const br = iso2 === "BR" ? bulk.brazil || {} : {};
+  const rate = macroPickFreshest(br.rate, bulk.bis?.[iso2]);
+  const inflation = macroPickFreshest(br.inflation, bulk.euCpi?.[iso2], bulk.oecdCpi?.[iso2]);
+  const unemployment = macroPickFreshest(br.unemployment, bulk.euUnemp?.[iso2], bulk.oecdUnemp?.[iso2]);
+
+  const monthsAgo = (d) => {
+    const [y, m = "06"] = String(d).split("-");
+    const now = new Date();
+    return (now.getFullYear() - Number(y)) * 12 + (now.getMonth() + 1 - Number(m));
+  };
+  const fresh = (c, max = 6) => c && !c.annual && monthsAgo(c.date) <= max;
+
+  // Banco Mundial só pro que está sem dado recente (e PIB/dívida, que só existem em base anual fora do Brasil)
+  const needWB = {
+    gdp: !br.gdp,
+    inflation: !fresh(inflation),
+    unemployment: !fresh(unemployment),
+    debt: !br.debt,
+    realInterest: true,
+  };
+  const keys = Object.keys(needWB).filter((k) => needWB[k]);
+  const wbVals = await Promise.all(keys.map((k) => fetchWorldBankIndicator(iso2, MACRO_INDICATORS[k])));
+  const wb = Object.fromEntries(keys.map((k, i) => [k, wbVals[i]]));
+
+  const finalInfl = macroPickFreshest(inflation, wb.inflation);
+  const finalUnemp = macroPickFreshest(unemployment, wb.unemployment);
+
+  // Juros reais = taxa básica − inflação 12m (quando as duas são recentes); senão, aproximação anual do Banco Mundial
+  let realInterest = null;
+  if (rate && fresh(rate, 8) && finalInfl && fresh(finalInfl, 8)) {
+    realInterest = {
+      value: rate.value - finalInfl.value,
+      date: macroDateRank(rate.date) < macroDateRank(finalInfl.date) ? rate.date : finalInfl.date,
+      src: "calculado: juros − inflação",
+    };
+  } else {
+    realInterest = wb.realInterest;
+  }
+
+  return {
+    gdp: br.gdp || wb.gdp,
+    inflation: finalInfl,
+    unemployment: finalUnemp,
+    debt: br.debt || wb.debt,
+    rate,
+    realInterest,
+    loadedAt: bulk.ts,
+  };
 }
 
 function isoToFlagEmoji(iso2) {
@@ -3266,6 +3490,30 @@ function formatGDP(value) {
 function formatPct(value) {
   if (value == null) return "Sem dado";
   return `${value.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%`;
+}
+
+
+function macroFmtRef(ind) {
+  if (!ind) return "";
+  const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const parts = String(ind.date).split("-");
+  let when;
+  if (parts.length === 3) when = `${parts[2]}/${parts[1]}/${parts[0]}`;
+  else if (parts.length === 2) when = `${meses[Number(parts[1]) - 1] || parts[1]}/${parts[0]}`;
+  else when = `${parts[0]} (dado anual)`;
+  return `${when} · ${ind.src}${ind.note ? " · " + ind.note : ""}`;
+}
+
+function MacroRow({ label, ind, fmt }) {
+  return (
+    <div className="tf-macro-indicator-row">
+      <div style={{ minWidth: 0 }}>
+        <span className="tf-muted">{label}</span>
+        {ind && <div className="tf-muted" style={{ fontSize: 10.5, opacity: 0.8, marginTop: 1 }}>{macroFmtRef(ind)}</div>}
+      </div>
+      <span className="tf-mono" style={{ fontWeight: 700, textAlign: "right" }}>{fmt(ind?.value)}</span>
+    </div>
+  );
 }
 
 function latLonToVector3(lat, lon, radius) {
@@ -3482,20 +3730,35 @@ function MacroMapView() {
     return () => { cancelled = true; if (cleanupGlobe) cleanupGlobe(); };
   }, []);
 
-  const loadCountry = async (country) => {
+  const selectedRef = useRef(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+
+  const loadCountry = async (country, force = false) => {
+    selectedRef.current = country;
     setSelected(country);
     setCountryData(null);
     setLoadingData(true);
-    const [gdp, inflation, unemployment, debt, realInterest] = await Promise.all([
-      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.gdp),
-      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.inflation),
-      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.unemployment),
-      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.debt),
-      fetchWorldBankIndicator(country.iso2, MACRO_INDICATORS.realInterest),
-    ]);
-    setCountryData({ gdp, inflation, unemployment, debt, realInterest });
-    setLoadingData(false);
+    try {
+      const bulk = await macroLoadBulk(force);
+      const data = await macroBuildCountry(country, bulk);
+      if (selectedRef.current !== country) return;
+      setCountryData(data);
+      setUpdatedAt(new Date());
+    } catch {
+      if (selectedRef.current === country) setCountryData({});
+    }
+    if (selectedRef.current === country) setLoadingData(false);
   };
+
+  // pré-carrega as fontes e renova sozinho a cada 30 min enquanto a tela estiver aberta
+  useEffect(() => {
+    macroLoadBulk().catch(() => {});
+    const id = setInterval(() => {
+      if (selectedRef.current) loadCountry(selectedRef.current, true);
+      else macroLoadBulk(true).catch(() => {});
+    }, MACRO_REFRESH_MS);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div>
@@ -3545,28 +3808,24 @@ function MacroMapView() {
                   <p className="tf-muted" style={{ fontSize: 12.5, marginTop: 10 }}>Buscando dados...</p>
                 </div>
               ) : (
-                <div className="tf-macro-indicators">
-                  <div className="tf-macro-indicator-row">
-                    <span className="tf-muted">PIB {countryData?.gdp?.date && `(${countryData.gdp.date})`}</span>
-                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatGDP(countryData?.gdp?.value)}</span>
+                <>
+                  <div className="tf-macro-indicators">
+                    <MacroRow label="Taxa básica de juros" ind={countryData?.rate} fmt={formatPct} />
+                    <MacroRow label="Inflação (12 meses)" ind={countryData?.inflation} fmt={formatPct} />
+                    <MacroRow label="Juros reais" ind={countryData?.realInterest} fmt={formatPct} />
+                    <MacroRow label="Desemprego" ind={countryData?.unemployment} fmt={formatPct} />
+                    <MacroRow label="PIB" ind={countryData?.gdp} fmt={formatGDP} />
+                    <MacroRow label="Dívida pública (% PIB)" ind={countryData?.debt} fmt={formatPct} />
                   </div>
-                  <div className="tf-macro-indicator-row">
-                    <span className="tf-muted">Inflação {countryData?.inflation?.date && `(${countryData.inflation.date})`}</span>
-                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.inflation?.value)}</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 12 }}>
+                    <span className="tf-muted" style={{ fontSize: 11 }}>
+                      {updatedAt ? `Consultado agora às ${updatedAt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+                    </span>
+                    <button type="button" className="tf-btn-outline" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => loadCountry(selected, true)}>
+                      <RefreshCw size={12} /> Atualizar
+                    </button>
                   </div>
-                  <div className="tf-macro-indicator-row">
-                    <span className="tf-muted">Desemprego {countryData?.unemployment?.date && `(${countryData.unemployment.date})`}</span>
-                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.unemployment?.value)}</span>
-                  </div>
-                  <div className="tf-macro-indicator-row">
-                    <span className="tf-muted">Dívida pública (% PIB) {countryData?.debt?.date && `(${countryData.debt.date})`}</span>
-                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.debt?.value)}</span>
-                  </div>
-                  <div className="tf-macro-indicator-row">
-                    <span className="tf-muted">Juros reais {countryData?.realInterest?.date && `(${countryData.realInterest.date})`}</span>
-                    <span className="tf-mono" style={{ fontWeight: 700 }}>{formatPct(countryData?.realInterest?.value)}</span>
-                  </div>
-                </div>
+                </>
               )}
             </>
           )}
@@ -3574,9 +3833,10 @@ function MacroMapView() {
       </div>
 
       <p className="tf-muted" style={{ fontSize: 11, marginTop: 16, maxWidth: 700 }}>
-        Dados públicos do Banco Mundial (World Bank Open Data), atualizados por eles anualmente — por isso o ano de referência aparece ao lado de cada indicador.
-        "Juros reais" é uma aproximação (taxa de juros real da economia) e não é exatamente a taxa básica do Banco Central de cada país.
-        Cobre as principais economias do mundo; países menores podem não ter todos os indicadores disponíveis.
+        Os dados são buscados direto das fontes oficiais toda vez que você abre um país e se renovam sozinhos a cada 30 minutos.
+        Em cada indicador aparece o mês de referência e quem publicou: Banco Central do Brasil (Brasil), BIS (juros dos bancos centrais), Eurostat e OCDE (inflação e desemprego) e Banco Mundial.
+        Quando um país ainda não tem número mais novo numa fonte aberta, o app mostra o último dado anual disponível e marca como "dado anual". Cada órgão tem seu próprio calendário de divulgação, então o dado mais recente de cada país pode variar.
+        "Juros reais" = taxa básica menos inflação dos últimos 12 meses. PIB e dívida são divulgados com defasagem pelos próprios órgãos (fora o Brasil, que vem do Banco Central).
       </p>
     </div>
   );
