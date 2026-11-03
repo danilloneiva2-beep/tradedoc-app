@@ -39,7 +39,7 @@ function fmtBRL(v) {
     const usd = Math.abs(n) / USD_BRL_RATE;
     return `${sign}US$ ${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
-  return `${sign}R$ ${Math.abs(n).toLocaleString("pt-BR")}`;
+  return `${sign}R$ ${Math.abs(n).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}`;
 }
 
 /* ---------- Utilidades compartilhadas ---------- */
@@ -269,10 +269,12 @@ function fmtPlain(v) {
   return `${n < 0 ? "-" : ""}R$ ${Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// Início (segunda) e fim (domingo) de uma semana, em datas locais. offset 0 = esta semana, 1 = passada.
+// Início (domingo) e fim (sábado) de uma semana, em datas locais — a mesma semana
+// do Calendário (DOM a SÁB), pra os totais baterem. Assim o trade de domingo à noite
+// (abertura de Forex/cripto) entra na semana que está começando. offset 0 = esta semana, 1 = passada.
 function weekRange(offsetWeeks = 0) {
   const d = new Date();
-  const dow = (d.getDay() + 6) % 7;
+  const dow = d.getDay();
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - dow - 7 * offsetWeeks);
   const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
   return [localDateStr(start), localDateStr(end)];
@@ -4303,7 +4305,7 @@ function ToolsView() {
 
 /* --------------------------- Login / Onboarding --------------------------- */
 
-function LoginScreen({ onAuth }) {
+function LoginScreen({ onAuth, notice }) {
   const [mode, setMode] = useState("login"); // login | signup
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -4380,6 +4382,11 @@ function LoginScreen({ onAuth }) {
         <div className="tf-brand tf-brand-center"><div className="tf-brand-name tf-brand-name-lg">TRADE<span className="text-lime">FY</span></div></div>
         <p className="tf-auth-tagline-brand">PERFORMANCE <span className="text-lime">QUE EVOLUI.</span></p>
         <p className="tf-muted" style={{ fontSize: 11.5, margin: "-8px 0 14px" }}>Acesso liberado após confirmação do plano.</p>
+        {notice && (
+          <div role="alert" style={{ border: "1px solid var(--coral, #f87171)", background: "rgba(248,113,113,0.08)", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, lineHeight: 1.45, margin: "0 0 14px" }}>
+            {notice}
+          </div>
+        )}
 
         <a href="https://tradefyapp.com.br/#planos" target="_blank" rel="noopener" className="tf-signup-cta-banner">
           <span>Ainda não é assinante? <b>Conheça os planos e assine aqui</b></span>
@@ -4678,6 +4685,7 @@ export default function App() {
 function AppInner() {
   const [session, setSession] = useState(null);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState("");
   const [loadingSession, setLoadingSession] = useState(true);
   const [loadingUserData, setLoadingUserData] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -5054,8 +5062,79 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [tourKey, profile, subscription, loadingUserData, trades.length]);
 
+  // ── Sessão única: só um aparelho por conta ──────────────────────────────
+  // Cada aparelho guarda um "código de acesso" próprio. Quando alguém entra num
+  // aparelho novo, esse aparelho grava o código dele no perfil (active_session_id).
+  // Os outros aparelhos conferem esse campo de tempos em tempos: se o código
+  // gravado não for o deles, saem da conta sozinhos. Contas marcadas como
+  // session_exempt (ex.: a do dono e de teste) podem ficar em vários aparelhos.
+  const sessionUserId = session?.user?.id;
+  const sessionExempt = !!profile?.session_exempt;
+  const sessionTokenRef = useRef(null);
+  useEffect(() => { if (sessionUserId) setSessionNotice(""); }, [sessionUserId]);
+  useEffect(() => {
+    if (!sessionUserId || !profile || sessionExempt || checkingMfa || mfaNeeded) return undefined;
+    const key = `tradefy-session-token-${sessionUserId}`;
+    let stopped = false;
+    let busy = false;
+    const makeToken = () => (window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const readLocal = () => { try { return localStorage.getItem(key); } catch (e) { return null; } };
+    const saveLocal = (t) => { try { localStorage.setItem(key, t); } catch (e) { /* ok */ } };
+
+    const check = async () => {
+      if (stopped || busy || document.visibilityState === "hidden") return;
+      busy = true;
+      try {
+        const { data, error } = await supabase.from("profiles").select("active_session_id").eq("id", sessionUserId).maybeSingle();
+        // Falha de rede ou coluna ainda não criada: não derruba ninguém.
+        if (error || !data || stopped) return;
+        const remote = data.active_session_id || null;
+        let local = sessionTokenRef.current || readLocal();
+        if (!local) {
+          // Aparelho sem código = acabou de entrar: assume o acesso da conta.
+          local = makeToken();
+          sessionTokenRef.current = local;
+          saveLocal(local);
+          await supabase.from("profiles").update({ active_session_id: local }).eq("id", sessionUserId);
+          return;
+        }
+        sessionTokenRef.current = local;
+        if (!remote) {
+          await supabase.from("profiles").update({ active_session_id: local }).eq("id", sessionUserId);
+          return;
+        }
+        if (remote !== local) {
+          stopped = true;
+          sessionTokenRef.current = null;
+          try { localStorage.removeItem(key); } catch (e) { /* ok */ }
+          setSessionNotice("Sua conta foi acessada em outro dispositivo. Por segurança, o Tradefy permite apenas um acesso por vez.");
+          // scope "local": sai só deste aparelho, sem derrubar o aparelho novo.
+          await supabase.auth.signOut({ scope: "local" });
+          setActive("dashboard");
+        }
+      } catch (e) { /* sem internet: tenta de novo no próximo ciclo */ }
+      finally { busy = false; }
+    };
+
+    check();
+    const timer = setInterval(check, 15000);
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", check);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", check);
+    };
+  }, [sessionUserId, profile?.id, sessionExempt, checkingMfa, mfaNeeded]);
+
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try { if (sessionUserId) localStorage.removeItem(`tradefy-session-token-${sessionUserId}`); } catch (e) { /* ok */ }
+    sessionTokenRef.current = null;
+    await supabase.auth.signOut({ scope: "local" });
     setActive("dashboard");
   };
 
@@ -5119,7 +5198,7 @@ function AppInner() {
         <ResetPasswordScreen onDone={() => setRecoveryMode(false)} />
       ) : (
         <>
-          {!session && <LoginScreen />}
+          {!session && <LoginScreen notice={sessionNotice} />}
           {session && checkingMfa && <LoadingScreen />}
           {session && !checkingMfa && mfaNeeded && (
             <MfaChallengeScreen onVerified={() => setMfaNeeded(false)} onLogout={handleLogout} />
