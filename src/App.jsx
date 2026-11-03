@@ -32,6 +32,21 @@ let CURRENCY_MODE = "BRL";
 let KNOWN_SETUPS = [];
 let USD_BRL_RATE = 1;
 
+// Lê um número digitado ou exportado no formato brasileiro. Entende "1.270,89",
+// "1 270,89", "R$ 1.270,89", "10.000", "1270,89" e "1270.89". Antes, "1.270,89"
+// virava 1,27 (o ponto era tratado como decimal) — o que gerava valores errados.
+function parseBRNumber(v) {
+  if (typeof v === "number") return v;
+  let s = String(v == null ? "" : v).replace(/\u2212/g, "-").replace(/[^\d,.\-+]/g, "");
+  if (!s) return NaN;
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^[-+]?[1-9]\d{0,2}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  return parseFloat(s);
+}
+const numOrZero = (v) => { const n = parseBRNumber(v); return Number.isFinite(n) ? n : 0; };
+// Ordem cronológica: dia e, dentro do dia, o horário (quando existe).
+const compareTradesChrono = (a, b) => a.trade_date.localeCompare(b.trade_date) || (a.trade_time || "").localeCompare(b.trade_time || "");
+
 function fmtBRL(v) {
   const n = Number(v) || 0;
   const sign = n < 0 ? "-" : "+";
@@ -97,7 +112,7 @@ function parseLocalDate(dateStr) {
 
 function useDerivedData(trades, accounts) {
   return useMemo(() => {
-    const sorted = [...trades].sort((a, b) => parseLocalDate(a.trade_date) - parseLocalDate(b.trade_date));
+    const sorted = [...trades].sort(compareTradesChrono);
 
     const totalPnL = trades.reduce((s, t) => s + Number(t.pnl), 0);
     const currentEquity = accounts.reduce((s, a) => s + Number(a.balance), 0);
@@ -348,7 +363,7 @@ function escHtml(v) {
 
 function buildReportHtml({ trades, periodLabel, userName, accountsLabel }) {
   const sm = summarizeTrades(trades);
-  const sorted = [...trades].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+  const sorted = [...trades].sort(compareTradesChrono);
   const dayMap = {};
   trades.forEach((t) => { dayMap[t.trade_date] = (dayMap[t.trade_date] || 0) + Number(t.pnl); });
   const days = Object.entries(dayMap);
@@ -692,12 +707,8 @@ function Sidebar({ active, setActive, userName, userEmail, mobileOpen, onClose, 
 function brNumberToFloat(v) {
   if (v == null) return 0;
   if (typeof v === "number") return v;
-  const s = String(v).trim();
-  if (!s) return 0;
-  // formato brasileiro: milhar com ponto, decimal com vírgula
-  const cleaned = s.replace(/\./g, "").replace(",", ".");
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? 0 : n;
+  const n = parseBRNumber(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function mt5DateToISO(raw) {
@@ -1017,7 +1028,7 @@ const MOOD_OPTIONS = ["Calmo", "Confiante", "Ansioso", "Ganancioso", "Frustrado"
 function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) {
   const [asset, setAsset] = useState(editTrade?.asset || "WINFUT");
   const [side, setSide] = useState(editTrade?.side || "Compra");
-  const [amount, setAmount] = useState(editTrade ? String(Math.abs(Number(editTrade.pnl))) : "");
+  const [amount, setAmount] = useState(editTrade ? String(Math.abs(Number(editTrade.pnl))).replace(".", ",") : "");
   const [outcome, setOutcome] = useState(editTrade ? (Number(editTrade.pnl) >= 0 ? "win" : "loss") : "win");
   const [date, setDate] = useState(editTrade?.trade_date || initialDate || localDateStr());
   const [accountId, setAccountId] = useState(editTrade?.account_id || accounts[0]?.id || "");
@@ -1032,7 +1043,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
   const [setup, setSetup] = useState(editTrade?.setup || "");
   const [tags, setTags] = useState(editTrade?.tags || "");
   const [tradeTime, setTradeTime] = useState(editTrade?.trade_time || "");
-  const [riskAmount, setRiskAmount] = useState(editTrade?.risk_amount ? String(editTrade.risk_amount) : "");
+  const [riskAmount, setRiskAmount] = useState(editTrade?.risk_amount ? String(editTrade.risk_amount).replace(".", ",") : "");
   const [fees, setFees] = useState(editTrade?.fees ? String(editTrade.fees) : "");
 
   const handleFileChange = (e) => {
@@ -1050,7 +1061,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const val = Math.abs(parseFloat(amount.replace(",", "."))) || 0;
+    const val = Math.round(Math.abs(numOrZero(amount)) * 100) / 100;
     if (val === 0 || !accountId) return;
     const pnl = outcome === "win" ? val : -val;
     setSaving(true);
@@ -1075,7 +1086,7 @@ function NewTradeModal({ onClose, onSubmit, accounts, initialDate, editTrade }) 
     // foram apagados agora). Quem não usa esses campos não é afetado.
     const extra = {};
     const putTxt = (key, val, orig) => { const v = String(val || "").trim(); if (v) extra[key] = v; else if (editTrade && orig) extra[key] = null; };
-    const putNum = (key, val, orig) => { const n = parseFloat(String(val || "").replace(",", ".")); if (n > 0) extra[key] = n; else if (editTrade && orig) extra[key] = null; };
+    const putNum = (key, val, orig) => { const n = numOrZero(val); if (n > 0) extra[key] = n; else if (editTrade && orig) extra[key] = null; };
     putTxt("setup", setup, editTrade?.setup);
     putTxt("tags", tags, editTrade?.tags);
     putTxt("trade_time", tradeTime, editTrade?.trade_time);
@@ -1279,7 +1290,7 @@ function DailyGuardCard({ todayPnl, todayCount, goal, stop, onSave }) {
   const [st, setSt] = useState(stop ? String(stop) : "");
   const [saving, setSaving] = useState(false);
   useEffect(() => { setG(goal ? String(goal) : ""); setSt(stop ? String(stop) : ""); }, [goal, stop]);
-  const parse = (v) => { const n = parseFloat(String(v).replace(",", ".")); return n > 0 ? n : null; };
+  const parse = (v) => { const n = numOrZero(v); return n > 0 ? n : null; };
   const hasGoal = Number(goal) > 0;
   const hasStop = Number(stop) > 0;
   const stopHit = hasStop && todayPnl <= -Number(stop);
@@ -1440,6 +1451,7 @@ function GettingStartedCard({ data, hasLimits, onOpenModal, onOpenImport }) {
 
 function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteTrade, accounts, accountFilter, setAccountFilter, canShareWithMentor, onShareWithMentor, dailyGoal, dailyStop, onSaveDailyLimits, onOpenReport, period = "all", onChangePeriod, allTrades }) {
   const { equityCurve, winRate, totalPnL, profitFactor, maxDD, assetPerf, weekdayPerf, recentTrades, currentEquity } = data;
+  const eqSpan = equityCurve.length ? Math.max(...equityCurve.map((p) => p.eq)) - Math.min(...equityCurve.map((p) => p.eq)) : 0;
   const todayStats = useMemo(() => {
     const today = localDateStr();
     const list = (allTrades || data.rawTrades).filter((t) => t.trade_date === today);
@@ -1489,7 +1501,7 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
       <div className="tf-card tf-hero-chart">
         <div className="tf-card-head">
           <div><h3>Curva de capital</h3></div>
-          <div className="tf-hero-value">R$ {currentEquity.toLocaleString("pt-BR")}</div>
+          <div className="tf-hero-value">{fmtBRL(currentEquity).replace("+", "")}</div>
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={equityCurve} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
@@ -1501,8 +1513,8 @@ function DashboardView({ data, onOpenModal, onOpenImport, onEditTrade, onDeleteT
             </defs>
             <CartesianGrid stroke="#1C2537" vertical={false} />
             <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
-            <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v/1000).toFixed(0)}k`} domain={["auto", "auto"]} />
-            <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Capital"]} />
+            <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(eqSpan < 8000 ? 1 : 0).replace(".", ",")}k`} domain={["auto", "auto"]} />
+            <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [fmtBRL(v).replace("+", ""), "Capital"]} />
             <Area type="monotone" dataKey="eq" stroke="#22C55E" strokeWidth={2.5} fill="url(#eqFill)" />
           </AreaChart>
         </ResponsiveContainer>
@@ -1773,7 +1785,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
   const avgLoss = monthLosses.length ? grossLoss / monthLosses.length : 0;
   const monthRR = avgLoss > 0 ? (avgWin / avgLoss).toFixed(2) : (avgWin > 0 ? "∞" : "—");
 
-  const sortedMonthTrades = [...monthTrades].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+  const sortedMonthTrades = [...monthTrades].sort(compareTradesChrono);
   let runningEq = 0;
   const monthEquityCurve = sortedMonthTrades.map((t) => {
     runningEq += Number(t.pnl);
@@ -1807,14 +1819,16 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
   // ---- Meta do mês e projeção (só nos dias úteis) ----
   const goalValue = Number(monthlyGoal) > 0 ? Number(monthlyGoal) : 0;
   const goalPct = goalValue ? Math.max(0, Math.min(100, (Math.max(monthTotal, 0) / goalValue) * 100)) : 0;
-  const weekdaysIn = (from, to) => { let c = 0; for (let d = from; d <= to; d++) { const w = new Date(year, month, d).getDay(); if (w !== 0 && w !== 6) c++; } return c; };
+  // Só desconta sábado/domingo se o trader não operou nenhum fim de semana no mês (senão a projeção ficava inflada).
+  const tradedWeekend = Object.keys(dayStats).some((d) => { const w = new Date(year, month, Number(d)).getDay(); return w === 0 || w === 6; });
+  const weekdaysIn = (from, to) => { let c = 0; for (let d = from; d <= to; d++) { const w = new Date(year, month, d).getDay(); if (tradedWeekend || (w !== 0 && w !== 6)) c++; } return c; };
   const todayNum = isCurrentMonth ? Number(todayStr.slice(8, 10)) : 0;
   const elapsedBiz = isCurrentMonth ? weekdaysIn(1, todayNum) : 0;
   const totalBiz = weekdaysIn(1, daysInMonth);
   const projection = isCurrentMonth && elapsedBiz > 0 && monthTrades.length > 0 ? (monthTotal / elapsedBiz) * totalBiz : null;
 
   const saveGoal = async () => {
-    const n = parseFloat(String(goalInput).replace(/\./g, "").replace(",", "."));
+    const n = numOrZero(goalInput);
     setSavingGoal(true);
     await onSaveMonthlyGoal(n > 0 ? n : null);
     setSavingGoal(false);
@@ -1951,7 +1965,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
                 <CartesianGrid stroke="#1C2537" vertical={false} />
                 <XAxis dataKey="d" stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="#5B6478" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} domain={["auto", "auto"]} />
-                <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [`R$ ${Number(v).toLocaleString("pt-BR")}`, "Resultado acumulado"]} />
+                <Tooltip contentStyle={{ background: "#131922", border: "1px solid #232C3B", borderRadius: 10, fontSize: 12 }} formatter={(v) => [fmtBRL(v), "Resultado acumulado"]} />
                 <Area type="monotone" dataKey="eq" stroke="#5FCB93" strokeWidth={2.2} fill="url(#calEqFill)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -2105,7 +2119,7 @@ function CalendarView({ trades, accounts, onNewTrade, onEditTrade, onDeleteTrade
 function AccountCard({ account, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(account.name);
-  const [balance, setBalance] = useState(String(account.balance));
+  const [balance, setBalance] = useState(String(account.balance).replace(".", ","));
   const [type, setType] = useState(account.type);
   const [status, setStatus] = useState(account.status);
   const [saving, setSaving] = useState(false);
@@ -2113,7 +2127,7 @@ function AccountCard({ account, onUpdate, onDelete }) {
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    const bal = parseFloat(balance.replace(",", ".")) || 0;
+    const bal = numOrZero(balance);
     await onUpdate(account.id, { name: name || "Conta", type, balance: bal, status: status || "Ativa" });
     setSaving(false);
     setEditing(false);
@@ -2151,7 +2165,7 @@ function AccountCard({ account, onUpdate, onDelete }) {
         <span className={`tf-badge ${account.type === "Prop Firm" ? "badge-blue" : "badge-outline"}`}>{account.type}</span>
       </div>
       <h3 className="tf-account-name">{account.name}</h3>
-      <div className="tf-account-balance">R$ {Number(account.balance).toLocaleString("pt-BR")}</div>
+      <div className="tf-account-balance">{fmtBRL(account.balance).replace("+", "")}</div>
       <div className="tf-account-status"><ShieldCheck size={13} className="text-lime" /> {account.status}</div>
       <div className="tf-account-actions">
         <button type="button" className="tf-row-action" onClick={() => setEditing(true)} title="Editar"><Pencil size={13} /> Editar</button>
@@ -2172,7 +2186,7 @@ function AccountsView({ accounts, onAddAccount, onUpdateAccount, onDeleteAccount
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    const bal = parseFloat(balance.replace(",", ".")) || 0;
+    const bal = numOrZero(balance);
     await onAddAccount({ name: name || "Nova conta", type, balance: bal, status: "Ativa" });
     setSaving(false);
     setAdding(false);
@@ -2728,7 +2742,7 @@ function PropRiskTool() {
     setForexLotIdx(0);
   };
 
-  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const num = numOrZero;
   const daily = num(dailyLimit);
   const risk = num(riskPct);
   const stop = num(stopPoints);
@@ -2804,7 +2818,7 @@ function PropRiskTool() {
 
       {showResult && (
         <div className="tf-stats-grid" style={{ marginTop: 20 }}>
-          <StatCard icon={ShieldCheck} label="Risco por operação" value={`${asset.currency} ${riskPerTrade.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+          <StatCard icon={ShieldCheck} label="Risco por operação" value={`${asset.currency} ${riskPerTrade.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="neutral" />
           <StatCard icon={Hash} label={market === "b3" ? "Contratos sugeridos" : "Lotes sugeridos"} value={suggestedSize} tone={suggestedSize > 0 ? "up" : "down"} />
           <StatCard icon={AlertTriangle} label="Perdas seguidas até o limite do dia" value={tradesUntilLimit} tone="neutral" />
         </div>
@@ -2925,7 +2939,7 @@ function RiskManagerTool() {
     setForexLotIdx(0);
   };
 
-  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const num = numOrZero;
   const cap = num(capital);
   const risk = num(riskPct);
   const stop = num(stopPoints);
@@ -2994,9 +3008,9 @@ function RiskManagerTool() {
 
       {showResult && (
         <div className="tf-stats-grid" style={{ marginTop: 20 }}>
-          <StatCard icon={ShieldCheck} label="Risco máximo da operação" value={`${asset.currency} ${riskAmount.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+          <StatCard icon={ShieldCheck} label="Risco máximo da operação" value={`${asset.currency} ${riskAmount.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="neutral" />
           <StatCard icon={Hash} label={market === "b3" ? "Contratos sugeridos" : "Lotes sugeridos"} value={suggestedSize} tone={suggestedSize > 0 ? "up" : "down"} />
-          <StatCard icon={Scale} label="Perda por unidade no stop" value={`${asset.currency} ${lossPerUnit.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+          <StatCard icon={Scale} label="Perda por unidade no stop" value={`${asset.currency} ${lossPerUnit.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="neutral" />
         </div>
       )}
       {showResult && suggestedSize === 0 && (
@@ -3019,7 +3033,7 @@ function TaxCalculatorB3() {
   const [monthlySales, setMonthlySales] = useState("");
   const [previousLosses, setPreviousLosses] = useState("");
 
-  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const num = numOrZero;
   const profit = num(monthlyProfit);
   const sales = num(monthlySales);
   const losses = num(previousLosses);
@@ -3050,7 +3064,7 @@ function TaxCalculatorB3() {
             <label>Tipo de ativo</label>
             <select value={assetType} onChange={(e) => setAssetType(e.target.value)}>
               <option value="acoes">Ações</option>
-              <option value="outros">Outros (mini índice, mini dólar, FIIs...)</option>
+              <option value="outros">Outros (mini índice, mini dólar, opções...)</option>
             </select>
           </div>
         )}
@@ -3082,16 +3096,16 @@ function TaxCalculatorB3() {
             </p>
           ) : (
             <div className="tf-stats-grid" style={{ marginTop: 18 }}>
-              <StatCard icon={Scale} label="Base de cálculo" value={`R$ ${taxableBase.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
+              <StatCard icon={Scale} label="Base de cálculo" value={`R$ ${taxableBase.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="neutral" />
               <StatCard icon={Percent} label="Alíquota aplicada" value={`${rate}%`} tone="neutral" />
-              <StatCard icon={ShieldCheck} label="DARF estimado" value={`R$ ${taxDue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="down" />
+              <StatCard icon={ShieldCheck} label="DARF estimado" value={`R$ ${taxDue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="down" />
             </div>
           )}
         </>
       )}
 
       <p className="tf-muted" style={{ fontSize: 11, marginTop: 18 }}>
-        Estimativa educacional, não substitui a apuração feita por um contador. O DARF vence no último dia útil do mês seguinte. A isenção de R$ 20.000 vale só pra vendas de ações em swing trade, não vale pra day trade nem pra outros ativos.
+        Estimativa educacional, não substitui a apuração feita por um contador. O DARF vence no último dia útil do mês seguinte. A isenção de R$ 20.000 vale só pra vendas de ações em swing trade, não vale pra day trade nem pra outros ativos. FIIs têm alíquota própria (20%) e não entram nesta conta. Se o DARF der menos de R$ 10,00, ele não é emitido: o valor soma ao do mês seguinte. O imposto já retido na fonte (IRRF) pode ser descontado.
       </p>
     </div>
   );
@@ -3102,7 +3116,7 @@ function TaxCalculatorForex() {
   const [previousLosses, setPreviousLosses] = useState("");
   const [rate, setRate] = useState("15");
 
-  const num = (v) => parseFloat(String(v).replace(",", ".")) || 0;
+  const num = numOrZero;
   const profit = num(monthlyProfit);
   const losses = num(previousLosses);
   const r = num(rate);
@@ -3136,8 +3150,8 @@ function TaxCalculatorForex() {
       {monthlyProfit !== "" && (
         hasProfit ? (
           <div className="tf-stats-grid" style={{ marginTop: 18 }}>
-            <StatCard icon={Scale} label="Base de cálculo" value={`R$ ${taxableBase.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="neutral" />
-            <StatCard icon={ShieldCheck} label="Imposto estimado" value={`R$ ${taxDue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} tone="down" />
+            <StatCard icon={Scale} label="Base de cálculo" value={`R$ ${taxableBase.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="neutral" />
+            <StatCard icon={ShieldCheck} label="Imposto estimado" value={`R$ ${taxDue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} tone="down" />
           </div>
         ) : (
           <p className="text-lime" style={{ fontSize: 13, marginTop: 18 }}>
@@ -3593,8 +3607,7 @@ function MoodInsightsTool({ trades }) {
     const worst = withEnough[withEnough.length - 1];
     if (worst.avg >= best.avg) return null;
     if (worst.avg < 0 && best.avg > 0) {
-      const ratio = Math.abs(worst.avg) / best.avg;
-      return `Suas perdas médias são ${ratio.toFixed(1)}x maiores quando você marca "${worst.mood.toLowerCase()}", comparado ao seu melhor humor ("${best.mood.toLowerCase()}").`;
+      return `Quando você marca "${worst.mood.toLowerCase()}", perde em média ${fmtBRL(Math.abs(worst.avg)).replace("+", "")} por trade. Quando marca "${best.mood.toLowerCase()}", ganha em média ${fmtBRL(best.avg).replace("+", "")}.`;
     }
     return `Seu resultado médio é bem melhor quando você marca "${best.mood.toLowerCase()}" (${fmtBRL(best.avg)}) do que quando marca "${worst.mood.toLowerCase()}" (${fmtBRL(worst.avg)}).`;
   }, [stats]);
@@ -4552,7 +4565,7 @@ function OnboardingScreen({ onComplete }) {
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    await onComplete(name, { name: accountName || "Minha conta", balance: parseFloat(balance.replace(",", ".")) || BASE_CAPITAL });
+    await onComplete(name, { name: accountName || "Minha conta", balance: numOrZero(balance) || BASE_CAPITAL });
     setSaving(false);
   };
 
@@ -5387,12 +5400,11 @@ function fmtDateBR(iso) {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 }
 
-// Semana = segunda a domingo, a partir de qualquer dia escolhido
+// Semana = domingo a sábado (igual ao Calendário e ao Resumo da semana), a partir de qualquer dia escolhido
 function weekRangeFor(iso) {
   const d = parseLocalDate(iso);
   const dow = d.getDay();
-  const diffToMonday = dow === 0 ? -6 : 1 - dow;
-  const start = addDaysISO(iso, diffToMonday);
+  const start = addDaysISO(iso, -dow);
   return { start, end: addDaysISO(start, 6) };
 }
 
@@ -5600,7 +5612,7 @@ function ShareWithMentorModal({ session, accounts, trades, onClose }) {
 /* ----------- Mentor: aba "Resultados dos Alunos" ----------- */
 
 function computeShareStats(trades) {
-  const sorted = [...trades].sort((a, b) => parseLocalDate(a.trade_date) - parseLocalDate(b.trade_date));
+  const sorted = [...trades].sort(compareTradesChrono);
   const total = sorted.reduce((s, t) => s + Number(t.pnl), 0);
   const wins = sorted.filter((t) => Number(t.pnl) > 0);
   const losses = sorted.filter((t) => Number(t.pnl) < 0);
