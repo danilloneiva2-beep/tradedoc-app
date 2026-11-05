@@ -2383,7 +2383,7 @@ function MfaEnrollCard() {
   );
 }
 
-function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateCurrency, currentPlan, setActive, onLogout, theme, onToggleTheme }) {
+function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateCurrency, currentPlan, accessExpiresAt, setActive, onLogout, theme, onToggleTheme }) {
   const [name, setName] = useState(userName);
   const [savedMsg, setSavedMsg] = useState(false);
   const [newPwd, setNewPwd] = useState("");
@@ -2468,7 +2468,7 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateC
           <div className="tf-card">
             <div className="tf-card-head"><h3>Assinatura</h3></div>
             {currentPlan ? (
-              <><div className="tf-badge badge-blue" style={{ display: "inline-block", marginBottom: 10 }}>Plano {currentPlan} ativo</div>
+              <><div className="tf-badge badge-blue" style={{ display: "inline-block", marginBottom: 10 }}>Plano {currentPlan} ativo{accessExpiresAt ? ` · cortesia até ${formatExpiryDate(accessExpiresAt)}` : ""}</div>
               <button className="tf-btn-outline" onClick={() => setActive("plans")}>Gerenciar assinatura</button></>
             ) : (
               <><div className="tf-badge badge-outline" style={{ display: "inline-block", marginBottom: 10 }}>Nenhum plano ativo</div>
@@ -2485,46 +2485,123 @@ function ProfileView({ userName, userEmail, onUpdateProfile, currency, onUpdateC
   );
 }
 
-function PlansView({ currentPlan }) {
-  const isPro = (currentPlan || "").toLowerCase().includes("pro");
+const PLAN_CATALOG = {
+  starter: {
+    key: "starter",
+    name: "Starter",
+    tagline: "Diário completo para 1 conta",
+    monthly: { price: "29,90", unit: "/mês", link: "https://pay.cakto.com.br/5s3oi7z_988253" },
+    annual: { price: "299", unit: "/ano", eq: "equivale a R$ 24,92 por mês", link: "https://pay.cakto.com.br/jpbqpnv_989209" },
+    features: [
+      "1 conta de operação",
+      "Dashboard, curva de capital e métricas avançadas",
+      "Importação do MT5 e do ProfitPro",
+      "Calendário com meta do mês",
+      "Disciplina do dia: meta e limite de perda",
+      "Ferramentas: risco, imposto e Mapa Macro",
+    ],
+  },
+  pro: {
+    key: "pro",
+    name: "Pro",
+    tagline: "Mais de uma conta e análise completa",
+    monthly: { price: "59,90", unit: "/mês", link: "https://pay.cakto.com.br/37y8i8b_988948" },
+    annual: { price: "599", unit: "/ano", eq: "equivale a R$ 49,92 por mês", link: "https://pay.cakto.com.br/sx4vbtd_989217" },
+    features: [
+      "Tudo do Starter",
+      "Até 5 contas, com filtro por conta",
+      "Mente de Trader: resultado por humor",
+      "Gerenciamento Mesa Prop",
+      "Analytics avançado por ativo",
+      "Suporte prioritário",
+    ],
+  },
+};
 
-  if (isPro) {
-    return (
-      <div className="tf-view">
-        <div className="tf-view-header"><div><h1>Planos</h1><p className="tf-muted">Sua assinatura</p></div></div>
-        <div className="tf-card tf-plan-card plan-highlight" style={{ maxWidth: 360 }}>
-          <span className="tf-plan-tag tf-plan-tag-active">Plano atual</span>
-          <h3>Pro</h3>
-          <div className="tf-plan-price">R$ 59,90<span className="tf-muted">/mês</span></div>
-          <ul className="tf-plan-features">
-            <li><Check size={14} className="text-lime" /> Até 5 contas</li>
-            <li><Check size={14} className="text-lime" /> Analytics avançado</li>
-            <li><Check size={14} className="text-lime" /> Suporte prioritário</li>
-          </ul>
-        </div>
+function formatExpiryDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+// Cards de Starter e Pro com escolha mensal/anual. showCheckout: quais planos mostram botão de assinar.
+function PlanPicker({ currentKey = null, canBuy = { starter: true, pro: true }, currentLabel = "Plano atual" }) {
+  const [cycle, setCycle] = useState("monthly");
+  return (
+    <div>
+      <div className="tf-pref-toggle-group" style={{ maxWidth: 320, margin: "0 auto 22px" }}>
+        <button type="button" className={`tf-pref-toggle-btn ${cycle === "monthly" ? "active" : ""}`} onClick={() => setCycle("monthly")}>Mensal</button>
+        <button type="button" className={`tf-pref-toggle-btn ${cycle === "annual" ? "active" : ""}`} onClick={() => setCycle("annual")}>Anual · economize 2 meses</button>
       </div>
-    );
-  }
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 18, textAlign: "left" }}>
+        {["starter", "pro"].map((k) => {
+          const p = PLAN_CATALOG[k];
+          const c = p[cycle];
+          const isCurrent = currentKey === k;
+          return (
+            <div key={k} className={`tf-card tf-plan-card ${k === "pro" ? "plan-highlight" : ""}`}>
+              {isCurrent
+                ? <span className="tf-plan-tag tf-plan-tag-active">{currentLabel}</span>
+                : k === "pro" && <span className="tf-plan-tag">Mais completo</span>}
+              <h3>{p.name}</h3>
+              <p className="tf-muted" style={{ fontSize: 12.5, margin: 0 }}>{p.tagline}</p>
+              <div className="tf-plan-price">R$ {c.price}<span className="tf-muted">{c.unit}</span></div>
+              <div className="tf-muted" style={{ fontSize: 11.5, minHeight: 16, marginTop: -6 }}>{cycle === "annual" ? c.eq : ""}</div>
+              <ul className="tf-plan-features">
+                {p.features.map((f) => (
+                  <li key={f} style={{ alignItems: "flex-start" }}><Check size={14} className="text-lime" style={{ flexShrink: 0, marginTop: 2 }} /> {f}</li>
+                ))}
+              </ul>
+              {canBuy[k] && (
+                <a href={c.link} target="_blank" rel="noopener" className={k === "pro" ? "tf-btn-primary" : "tf-btn-outline"} style={{ textDecoration: "none", textAlign: "center", display: "block", marginTop: "auto" }}>
+                  {isCurrent ? `Renovar ${p.name}` : `Assinar ${p.name}`}
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PlansView({ currentPlan, accessExpiresAt }) {
+  const currentKey = !currentPlan ? null : String(currentPlan).toLowerCase().includes("pro") ? "pro" : "starter";
+  const isCourtesy = !!accessExpiresAt;
+  // Quem tem plano pago: só oferece o upgrade. Quem está em cortesia (acesso com data pra acabar): oferece os dois.
+  const canBuy = isCourtesy || !currentKey
+    ? { starter: true, pro: true }
+    : { starter: false, pro: currentKey === "starter" };
 
   return (
     <div className="tf-view">
-      <div className="tf-view-header"><div><h1>Planos</h1><p className="tf-muted">Faça upgrade e desbloqueie todo o Tradefy</p></div></div>
-      <div className="tf-card tf-plan-card plan-highlight" style={{ maxWidth: 360 }}>
-        <span className="tf-plan-tag">Upgrade</span>
-        <h3>Pro</h3>
-        <div className="tf-plan-price">R$ 59,90<span className="tf-muted">/mês</span></div>
-        <ul className="tf-plan-features">
-          <li><Check size={14} className="text-lime" /> Até 5 contas conectadas</li>
-          <li><Check size={14} className="text-lime" /> Analytics avançado por ativo</li>
-          <li><Check size={14} className="text-lime" /> Suporte prioritário</li>
-        </ul>
-        <a href="https://pay.cakto.com.br/37y8i8b_988948" target="_blank" rel="noopener" className="tf-btn-primary" style={{ textDecoration: "none", textAlign: "center", display: "block" }}>
-          Fazer upgrade para o Pro
-        </a>
-        <p className="tf-muted" style={{ fontSize: 11.5, marginTop: 10, marginBottom: 0 }}>
-          Seu acesso é liberado automaticamente assim que o pagamento for confirmado.
-        </p>
+      <div className="tf-view-header">
+        <div>
+          <h1>Planos</h1>
+          <p className="tf-muted">{currentKey && !isCourtesy ? "Sua assinatura" : "Escolha o plano que combina com você"}</p>
+        </div>
       </div>
+
+      {isCourtesy && (
+        <div className="tf-card" style={{ marginBottom: 20, borderColor: "var(--lime)" }}>
+          <p style={{ margin: 0, fontSize: 13.5 }}>
+            Seu acesso de cortesia vai até <strong>{formatExpiryDate(accessExpiresAt)}</strong>. Para continuar usando depois dessa data, escolha o Starter ou o Pro.
+            Use o mesmo e-mail do seu login ao pagar — o acesso é liberado automaticamente.
+          </p>
+        </div>
+      )}
+
+      <PlanPicker
+        currentKey={currentKey}
+        canBuy={canBuy}
+        currentLabel={isCourtesy ? "Cortesia ativa" : "Plano atual"}
+      />
+
+      <p className="tf-muted" style={{ fontSize: 11.5, marginTop: 18 }}>
+        Pagamento seguro pela Cakto. Seu acesso é liberado automaticamente assim que o pagamento for confirmado.
+        {currentKey && !isCourtesy && currentKey === "pro" ? " Pra trocar de plano, chame a gente no WhatsApp." : ""}
+      </p>
     </div>
   );
 }
@@ -4876,7 +4953,7 @@ function LoadingScreen() {
   );
 }
 
-function AccessPendingScreen({ onLogout, onRefresh }) {
+function AccessPendingScreen({ onLogout, onRefresh, expired = false, expiredAt = null }) {
   const [checking, setChecking] = useState(false);
   const [autoTries, setAutoTries] = useState(0);
   const MAX_AUTO_TRIES = 8; // ~ 1 tentativa a cada 8s por pouco mais de 1 minuto
@@ -4897,17 +4974,22 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
   }, [autoTries]);
 
   return (
-    <div className="tf-auth-screen">
-      <div className="tf-auth-card">
+    <div className="tf-auth-screen" style={{ overflowY: "auto", alignItems: "flex-start", padding: "32px 16px" }}>
+      <div className="tf-auth-card" style={{ maxWidth: 820, margin: "0 auto" }}>
         <div className="tf-pending-icon"><Lock size={22} /></div>
-        <h2 className="tf-onboarding-title">Acesso ainda não liberado</h2>
-        <p className="tf-muted" style={{ marginBottom: 20 }}>
-          Sua conta foi criada, mas o acesso ao Tradefy só é liberado depois da confirmação de um plano ativo.
+        <h2 className="tf-onboarding-title">{expired ? "Seu acesso de cortesia terminou" : "Escolha seu plano para entrar"}</h2>
+        <p className="tf-muted" style={{ marginBottom: 22 }}>
+          {expired
+            ? `Seu período gratuito${expiredAt ? ` (até ${formatExpiryDate(expiredAt)})` : ""} acabou. Seus trades e contas continuam guardados — escolha um plano para voltar a usar o Tradefy de onde parou.`
+            : "Sua conta foi criada, mas o acesso ao Tradefy só é liberado depois da confirmação de um plano ativo."}
         </p>
-        <a href="https://tradefyapp.com.br/#planos" className="tf-btn-primary tf-form-submit" style={{ marginBottom: 10, textDecoration: "none" }}>
-          Ver planos <ArrowRight size={15} />
-        </a>
-        <button className="tf-btn-outline" style={{ width: "100%", marginBottom: 10 }} onClick={handleRefresh} disabled={checking}>
+
+        <PlanPicker />
+
+        <p className="tf-muted" style={{ fontSize: 12, margin: "18px 0 14px" }}>
+          Use o <strong>mesmo e-mail do seu login</strong> na hora de pagar. Assim que o pagamento for confirmado, o acesso é liberado automaticamente.
+        </p>
+        <button className="tf-btn-outline" style={{ width: "100%", maxWidth: 360, marginBottom: 10 }} onClick={handleRefresh} disabled={checking}>
           {checking ? "Verificando..." : "Já paguei, verificar novamente"}
         </button>
         {autoTries < MAX_AUTO_TRIES && (
@@ -4915,7 +4997,9 @@ function AccessPendingScreen({ onLogout, onRefresh }) {
             Verificando automaticamente a cada poucos segundos...
           </p>
         )}
-        <button className="tf-skip-link" onClick={onLogout}>Sair da conta</button>
+        <div>
+          <button className="tf-skip-link" onClick={onLogout}>Sair da conta</button>
+        </div>
       </div>
     </div>
   );
@@ -4986,6 +5070,8 @@ function AppInner() {
   const [accounts, setAccounts] = useState([]);
   const [trades, setTrades] = useState([]);
   const [subscription, setSubscription] = useState(null);
+  const [accessExpiresAt, setAccessExpiresAt] = useState(null); // data em que a cortesia vence (null = sem vencimento)
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [studentAccess, setStudentAccess] = useState(null);
   const [active, setActive] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -5123,11 +5209,37 @@ function AppInner() {
     const { data: subData } = await supabase.from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
     setSubscription(subData || null);
 
+    // Cortesia (liberação manual) tem data pra acabar. Se a função ainda não existir no banco, segue sem vencimento.
+    try {
+      const { data: expiry, error: expiryError } = await supabase.rpc("my_access_expiry");
+      setAccessExpiresAt(expiryError ? null : (expiry || null));
+    } catch {
+      setAccessExpiresAt(null);
+    }
+    setNowTick(Date.now());
+
     // Confere se esse aluno tem o Painel do Aluno liberado (independente da
     // assinatura estar ativa ou não — as duas coisas juntas é que liberam o acesso).
     const { data: spaData } = await supabase.from("student_panel_access").select("id").eq("user_id", userId).maybeSingle();
     setStudentAccess(spaData || null);
   }
+
+  // Relógio leve: se a cortesia vencer com o app aberto, a tela de planos aparece sozinha.
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Avisa uma vez por acesso quando faltam poucos dias pra cortesia acabar.
+  const expiryWarnedRef = useRef(false);
+  useEffect(() => {
+    if (!accessExpiresAt || expiryWarnedRef.current || subscription?.status !== "active") return;
+    const msLeft = new Date(accessExpiresAt).getTime() - Date.now();
+    if (msLeft <= 0 || msLeft > 7 * 24 * 3600 * 1000) return;
+    expiryWarnedRef.current = true;
+    const days = Math.max(1, Math.ceil(msLeft / (24 * 3600 * 1000)));
+    notify(`Seu acesso de cortesia termina em ${days} ${days === 1 ? "dia" : "dias"} (${formatExpiryDate(accessExpiresAt)}). Veja os planos na aba Planos.`);
+  }, [accessExpiresAt, subscription]);
 
   const filteredAccountObjs = accountFilter.length === 0 ? accounts : accounts.filter((a) => accountFilter.includes(a.id));
   const filteredAccountIds = filteredAccountObjs.map((a) => a.id);
@@ -5420,7 +5532,8 @@ function AppInner() {
     );
   }
 
-  const hasActiveAccess = subscription?.status === "active";
+  const accessExpired = !!accessExpiresAt && new Date(accessExpiresAt).getTime() <= nowTick;
+  const hasActiveAccess = subscription?.status === "active" && !accessExpired;
   const isProPlan = (subscription?.plan || "").toLowerCase().includes("pro");
   const accountLimit = isProPlan ? 5 : 1;
   const isOwnerAccount = (session?.user?.email || "").toLowerCase() === MENTOR_OWNER_EMAIL;
@@ -5454,8 +5567,8 @@ function AppInner() {
       case "accounts": return <AccountsView accounts={accounts} onAddAccount={handleAddAccount} onUpdateAccount={handleUpdateAccount} onDeleteAccount={handleDeleteAccount} accountLimit={accountLimit} isProPlan={isProPlan} />;
       case "news": return <NewsView trades={trades} />;
       case "tools": return <ToolsView />;
-      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currency={profile?.currency || "BRL"} onUpdateCurrency={handleUpdateCurrency} currentPlan={subscription?.plan} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
-      case "plans": return <PlansView currentPlan={subscription?.plan} />;
+      case "profile": return <ProfileView userName={profile?.name || ""} userEmail={session?.user?.email} onUpdateProfile={handleUpdateProfile} currency={profile?.currency || "BRL"} onUpdateCurrency={handleUpdateCurrency} currentPlan={subscription?.plan} accessExpiresAt={accessExpiresAt} setActive={setActive} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
+      case "plans": return <PlansView currentPlan={subscription?.plan} accessExpiresAt={accessExpiresAt} />;
       default: return <DashboardView data={data} {...dashExtras} onOpenModal={() => setShowModal(true)} onOpenImport={() => setShowImportModal(true)} onEditTrade={setEditingTrade} onDeleteTrade={confirmAndDeleteTrade} accounts={accounts} accountFilter={accountFilter} setAccountFilter={setAccountFilter} canShareWithMentor={canShareWithMentor} onShareWithMentor={() => setShowShareModal(true)} />;
     }
   })();
@@ -5478,7 +5591,7 @@ function AppInner() {
           )}
           {session && !checkingMfa && !mfaNeeded && !profile && <OnboardingScreen onComplete={handleOnboardingComplete} />}
           {session && !checkingMfa && !mfaNeeded && profile && !hasActiveAccess && (
-            <AccessPendingScreen onLogout={handleLogout} onRefresh={loadUserData} />
+            <AccessPendingScreen onLogout={handleLogout} onRefresh={loadUserData} expired={accessExpired} expiredAt={accessExpiresAt} />
           )}
           {session && !checkingMfa && !mfaNeeded && profile && hasActiveAccess && (
             <>
